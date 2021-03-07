@@ -47,6 +47,31 @@ http.max_content_length: 1gb"""
     return configurationOptions
 
 
+def createKibanaYml(ipAddress, kibanaPwd, pathToKey, pathToCrt, pathToCaCrt):
+    """TODO: Docstring for createKibanaYml.
+
+    :ipAddress: TODO
+    :kibanaPwd: TODO
+    :pathToKey: TODO
+    :pathToCrt: TODO
+    :pathToCaCrt: TODO
+    :returns: TODO
+
+    """
+
+    configurationOptions = f"""# T-Pot Distributed Options
+server.port: 5601
+server.host: \\"0.0.0.0\\"
+elasticsearch.hosts: [\\"https://{ipAddress}:64298\\"]
+elasticsearch.username: \\"kibana\\"
+elasticsearch.password: \\"{kibanaPwd}\\"
+elasticsearch.ssl.certificate: {pathToCrt}
+elasticsearch.ssl.key: {pathToKey}
+elasticsearch.ssl.certificateAuthorities: [\\"{pathToCaCrt}\\"]"""
+
+    return configurationOptions
+
+
 def installTPot(conn, logger):
     """Install T-Pot Sensor type on connection server
 
@@ -84,8 +109,8 @@ def installTPot(conn, logger):
         # need to reboot after all this too!!!!
 
 
-def setupLoggingServer(conn, logger):
-    """Install ELK stack and configure logging server to receive T-Pot data
+def installConfigureElasticsearch(conn, logger):
+    """Install ELK stack and configure Elasticsearch on logging server
 
     :conn: TODO
     :logger: TODO
@@ -152,6 +177,17 @@ def setupLoggingServer(conn, logger):
     # I think I'm probably gonna need to wait for elasticsearch to boot up here
     # split up into multiple functions to be able to run them separately?
 
+
+def configureKibana(conn, logger):
+    """Configure Kibana on logging server to connect it with Elasticsearch
+
+    ### MUST RUN installConfigureElasticsearch BEFORE (AND PROBABLY WAIT AFTER) ###
+
+    :conn: TODO
+    :logger: TODO
+    :returns: TODO
+
+    """
     pwdSetupYes = Responder(
         pattern=r"Please confirm that you would like to continue \[y/N\]",
         response="y\n",
@@ -164,8 +200,38 @@ def setupLoggingServer(conn, logger):
     pwdFile = "elasticsearch_passwords.txt"
     logger.info(f"Generated ELK passwords, writing them to {pwdFile}.")
 
+    pwdRes = autoPasswords.stdout.strip()
+
     with open(pwdFile, "w") as f:
-        f.write(autoPasswords.stdout.strip())
+        f.write(pwdRes)
+
+    try:
+        # extract password for kibana user to put in kibana.yml
+        kibanaPwdSearch = "PASSWORD kibana = "
+
+        startInd = pwdRes.index(kibanaPwdSearch) + len(kibanaPwdSearch)
+        trimmedPwd = pwdRes[startInd:]
+        endInd = trimmedPwd.index("\n")
+
+        kibanaPass = trimmedPwd[:endInd]
+    except ValueError:
+        raise Exception("Kibana password not created by elasticsearch-setup-passwords")
+
+    # copying certificates isn't good but I couldn't get it to work with symlinks
+    conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
+
+    hostname = conn.run("hostname", hide="stdout").stdout.strip()
+
+    ymlConfig = createKibanaYml(
+        conn.host,
+        kibanaPass,
+        f"/etc/kibana/certs/{hostname}/{hostname}.key",
+        f"/etc/kibana/certs/{hostname}/{hostname}.crt",
+        "/etc/kibana/certs/ca/ca.crt",
+    )
+
+    conn.run(f'echo -e "{ymlConfig}" >> /etc/kibana/kibana.yml', hide="stdout")
+    logger.info("Edited /etc/kibana/kibana.yml")
 
 
 if __name__ == "__main__":
