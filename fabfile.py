@@ -59,7 +59,8 @@ def createKibanaYml(ipAddress, kibanaPwd, pathToKey, pathToCrt, pathToCaCrt):
 
     """
 
-    configurationOptions = f"""# T-Pot Distributed Options
+    configurationOptions = f"""
+# T-Pot Distributed Options
 server.port: 5601
 server.host: \\"0.0.0.0\\"
 elasticsearch.hosts: [\\"https://{ipAddress}:64298\\"]
@@ -119,6 +120,11 @@ def installConfigureElasticsearch(conn, logger):
     """
     conn.run("apt-get update && apt-get --yes upgrade", hide="stdout")
     conn.run("apt-get --yes install gnupg apt-transport-https unzip", hide="stdout")
+    conn.run(
+        "wget https://raw.githubusercontent.com/ezacl/"
+        "tpotce-light/slim-standard/.vimrc",
+        hide=True,
+    )
     logger.info("Updated packages and installed ELK dependencies")
 
     # this gives
@@ -130,6 +136,7 @@ def installConfigureElasticsearch(conn, logger):
         pty=True,
         hide="stdout",
     )
+    # this needs sudo tee if not already run as root
     conn.run(
         'echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main"'
         " | tee /etc/apt/sources.list.d/elastic-7.x.list",
@@ -213,12 +220,13 @@ def configureKibana(conn, logger):
         trimmedPwd = pwdRes[startInd:]
         endInd = trimmedPwd.index("\n")
 
-        kibanaPass = trimmedPwd[:endInd]
+        kibanaPass = trimmedPwd[:endInd].strip()
     except ValueError:
         raise Exception("Kibana password not created by elasticsearch-setup-passwords")
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
     conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
+    logger.info("Copied elasticsearch certificates to /etc/kibana.")
 
     hostname = conn.run("hostname", hide="stdout").stdout.strip()
 
@@ -232,6 +240,9 @@ def configureKibana(conn, logger):
 
     conn.run(f'echo -e "{ymlConfig}" >> /etc/kibana/kibana.yml', hide="stdout")
     logger.info("Edited /etc/kibana/kibana.yml")
+
+    conn.run("systemctl restart elasticsearch.service", hide="stdout")
+    conn.run("systemctl start kibana.service", hide="stdout")
 
 
 if __name__ == "__main__":
@@ -255,4 +266,5 @@ if __name__ == "__main__":
     )
 
     # installTPot(sensorConn, logger)
-    # setupLoggingServer(logConn, logger)
+    # installConfigureElasticsearch(logConn, logger)
+    # configureKibana(logConn, logger)
