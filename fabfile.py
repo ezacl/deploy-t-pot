@@ -30,13 +30,9 @@ def installTPot(sensorConn, loggingConn, logger):
         sensorConn.run("git checkout slim-standard", hide="stdout")
         logger.info("Checked out slim-standard branch")
 
-        # copy custom logstash.conf into location where tpot.yml expects a docker volume
-        sensorConn.put("logstash.conf", remote="/data/elk/")
-
         with sensorConn.cd("iso/installer/"):
-            # tPotInstall = conn.run(
-            #     "./install.sh --type=auto --conf=tpot.conf", hide="stdout"
-            # )
+            # can add hide="stdout" as always but good to see real time output of
+            # T-Pot installation
             tPotInstall = sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
             logger.info(tPotInstall.stdout.strip())
 
@@ -45,15 +41,18 @@ def installTPot(sensorConn, loggingConn, logger):
             else:
                 print("T-Pot installation failed. See log file.")
 
-        loggingConn.get("/etc/elasticsearch/certs/ca/ca.crt")
-        sensorConn.put("ca.crt", remote="/data/elk/ca.crt")
-        os.remove("ca.crt")
+    # copy custom logstash.conf into location where tpot.yml expects a docker volume
+    sensorConn.put("logstash.conf", remote="/data/elk/")
 
-        # rebooting server always throws an exception, so ignore
-        try:
-            sensorConn.run("reboot", hide="stdout")
-        except UnexpectedExit:
-            pass
+    loggingConn.get("/etc/elasticsearch/certs/ca/ca.crt")
+    sensorConn.put("ca.crt", remote="/data/elk/ca.crt")
+    os.remove("ca.crt")
+
+    # rebooting server always throws an exception, so ignore
+    try:
+        sensorConn.run("reboot", hide="stdout")
+    except UnexpectedExit:
+        pass
 
 
 def installConfigureElasticsearch(conn, logger):
@@ -126,9 +125,6 @@ def installConfigureElasticsearch(conn, logger):
 
     conn.run("systemctl start elasticsearch.service", hide="stdout")
     logger.info("Started elasticsearch service with systemd")
-
-    # I think I'm probably gonna need to wait for elasticsearch to boot up here
-    # split up into multiple functions to be able to run them separately?
 
 
 def configureKibana(conn, logger):
