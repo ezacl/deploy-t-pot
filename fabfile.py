@@ -3,6 +3,7 @@ import os
 
 from fabric import Connection
 from invoke import Responder
+from invoke.exceptions import UnexpectedExit
 
 from configFuncs import createElasticsearchYml, createKibanaYml
 
@@ -29,9 +30,8 @@ def installTPot(sensorConn, loggingConn, logger):
         sensorConn.run("git checkout slim-standard", hide="stdout")
         logger.info("Checked out slim-standard branch")
 
-        # trying to override logstash.conf to send data to remote elasticsearch
-        # may need actually add a volume after all, will see
-        sensorConn.put("logstash.conf", remote="/opt/tpot/docker/elk/logstash/dist/")
+        # copy custom logstash.conf into location where tpot.yml expects a docker volume
+        sensorConn.put("logstash.conf", remote="/data/elk/")
 
         with sensorConn.cd("iso/installer/"):
             # tPotInstall = conn.run(
@@ -49,7 +49,11 @@ def installTPot(sensorConn, loggingConn, logger):
         sensorConn.put("ca.crt", remote="/data/elk/ca.crt")
         os.remove("ca.crt")
 
-        # need to reboot after all this too!!!!
+        # rebooting server always throws an exception, so ignore
+        try:
+            sensorConn.run("reboot", hide="stdout")
+        except UnexpectedExit:
+            pass
 
 
 def installConfigureElasticsearch(conn, logger):
@@ -204,6 +208,6 @@ if __name__ == "__main__":
         host="167.71.101.194", user="root", connect_kwargs={"password": sensorPass}
     )
 
-    # installTPot(sensorConn, logger)
+    installTPot(sensorConn, logConn, logger)
     # installConfigureElasticsearch(logConn, logger)
     # configureKibana(logConn, logger)
