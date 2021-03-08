@@ -4,108 +4,50 @@ import os
 from fabric import Connection
 from invoke import Responder
 
-
-def createElasticsearchYml(pathToKey, pathToCrt, pathToCaCrt):
-    """TODO: Docstring for createElasticsearchYml.
-
-    :pathToKey: TODO
-    :pathToCrt: TODO
-    :pathToCaCrt: TODO
-    :returns: TODO
-
-    """
-    configurationOptions = f"""#
-# ----------------------- T-Pot Distributed Options ----------------------
-#
-cluster.name: t-pot-central
-node.name: node1
-network.host: 0.0.0.0
-http.port: 64298
-cluster.initial_master_nodes: ["node1"]
-xpack.security.enabled: true
-
-# internode communication (required if xpack.security is enabled)
-
-xpack.security.transport.ssl.enabled: true
-xpack.security.transport.ssl.verification_mode: certificate
-xpack.security.transport.ssl.key: {pathToKey}
-xpack.security.transport.ssl.certificate: {pathToCrt}
-xpack.security.transport.ssl.certificate_authorities: [ \\"{pathToCaCrt}\\" ]
-
-# client to node communication
-
-xpack.security.http.ssl.enabled: true
-xpack.security.http.ssl.verification_mode: certificate
-xpack.security.http.ssl.key: {pathToKey}
-xpack.security.http.ssl.certificate: {pathToCrt}
-xpack.security.http.ssl.certificate_authorities: [ \\"{pathToCaCrt}\\" ]
-
-# Workaround for logstash error Encountered a retryable error. Will retry with exponential backoff
-
-http.max_content_length: 1gb"""
-
-    return configurationOptions
+from configFuncs import createElasticsearchYml, createKibanaYml
 
 
-def createKibanaYml(ipAddress, kibanaPwd, pathToKey, pathToCrt, pathToCaCrt):
-    """TODO: Docstring for createKibanaYml.
-
-    :ipAddress: TODO
-    :kibanaPwd: TODO
-    :pathToKey: TODO
-    :pathToCrt: TODO
-    :pathToCaCrt: TODO
-    :returns: TODO
-
-    """
-
-    configurationOptions = f"""
-# T-Pot Distributed Options
-server.port: 5601
-server.host: \\"0.0.0.0\\"
-elasticsearch.hosts: [\\"https://{ipAddress}:64298\\"]
-elasticsearch.username: \\"kibana\\"
-elasticsearch.password: \\"{kibanaPwd}\\"
-elasticsearch.ssl.certificate: {pathToCrt}
-elasticsearch.ssl.key: {pathToKey}
-elasticsearch.ssl.certificateAuthorities: [\\"{pathToCaCrt}\\"]"""
-
-    return configurationOptions
-
-
-def installTPot(conn, logger):
+def installTPot(sensorConn, loggingConn, logger):
     """Install T-Pot Sensor type on connection server
 
-    :conn: fabric.Connection object with connection to sensor server (4 GB RAM)
+    :sensorConn: fabric.Connection object with connection to sensor server (4 GB RAM)
+    :logingConn: fabric.Connection object with connection to logging server (8 GB RAM)
     :logger: logging.logger object
     :returns: None
 
     """
-    conn.run("apt-get update && apt-get --yes upgrade", hide="stdout")
-    conn.run("apt-get --yes install git", hide="stdout")
+    sensorConn.run("apt-get update && apt-get --yes upgrade", hide="stdout")
+    sensorConn.run("apt-get --yes install git", hide="stdout")
     logger.info("Updated packages and installed git")
 
-    conn.run("git clone https://github.com/ezacl/tpotce-light /opt/tpot", hide="stdout")
+    sensorConn.run(
+        "git clone https://github.com/ezacl/tpotce-light /opt/tpot", hide="stdout"
+    )
     logger.info("Cloned T-Pot into /opt/tpot/")
 
-    with conn.cd("/opt/tpot/"):
-        conn.run("git checkout slim-standard", hide="stdout")
+    with sensorConn.cd("/opt/tpot/"):
+        sensorConn.run("git checkout slim-standard", hide="stdout")
         logger.info("Checked out slim-standard branch")
 
         # trying to override logstash.conf to send data to remote elasticsearch
         # may need actually add a volume after all, will see
-        conn.put("logstash.conf", remote="/opt/tpot/docker/elk/logstash/dist/")
+        sensorConn.put("logstash.conf", remote="/opt/tpot/docker/elk/logstash/dist/")
 
-        # with conn.cd("iso/installer/"):
-        #     tPotInstall = conn.run(
-        #         "./install.sh --type=auto --conf=tpot.conf", hide="stdout"
-        #     )
-        #     logger.info(tPotInstall.stdout.strip())
+        with sensorConn.cd("iso/installer/"):
+            # tPotInstall = conn.run(
+            #     "./install.sh --type=auto --conf=tpot.conf", hide="stdout"
+            # )
+            tPotInstall = sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
+            logger.info(tPotInstall.stdout.strip())
 
-        #     if tPotInstall.ok:
-        #         print("T-Pot installation successful.")
-        #     else:
-        #         print("T-Pot installation failed. See log file.")
+            if tPotInstall.ok:
+                print("T-Pot installation successful.")
+            else:
+                print("T-Pot installation failed. See log file.")
+
+        loggingConn.get("/etc/elasticsearch/certs/ca/ca.crt")
+        sensorConn.put("ca.crt", remote="/data/elk/ca.crt")
+        os.remove("ca.crt")
 
         # need to reboot after all this too!!!!
 
@@ -256,13 +198,10 @@ if __name__ == "__main__":
 
     sensorPass = os.environ.get("SENSOR_PASS")
     logConn = Connection(
-        host="167.71.246.62",
-        user="root",
-        connect_kwargs={"password": sensorPass}
-        # host="167.71.92.145", user="root", connect_kwargs={"password": sensorPass}
+        host="167.71.246.62", user="root", connect_kwargs={"password": sensorPass}
     )
     sensorConn = Connection(
-        host="159.203.169.33", user="root", connect_kwargs={"password": sensorPass}
+        host="167.71.101.194", user="root", connect_kwargs={"password": sensorPass}
     )
 
     # installTPot(sensorConn, logger)
