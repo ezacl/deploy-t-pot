@@ -56,17 +56,20 @@ def installTPot(sensorConn, loggingConn, logger):
         logger.info("Installed T-Pot and rebooted sensor server")
 
 
-def installConfigureElasticsearch(conn, logger):
+def installConfigureElasticsearch(conn, email, logger):
     """Install ELK stack and configure Elasticsearch on logging server
 
     :conn: TODO
+    :email: TODO
     :logger: TODO
     :returns: TODO
 
     """
     conn.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
     conn.run(
-        "apt-get --yes install gnupg apt-transport-https unzip", pty=True, hide="stdout"
+        "apt-get --yes install gnupg apt-transport-https certbot",
+        pty=True,
+        hide="stdout",
     )
     conn.run(
         "wget https://raw.githubusercontent.com/ezacl/"
@@ -95,30 +98,28 @@ def installConfigureElasticsearch(conn, logger):
     conn.run("apt-get --yes install elasticsearch kibana", pty=True, hide="stdout")
     logger.info("Installed elasticsearch and kibana")
 
-    hostname = conn.run("hostname", hide="stdout").stdout.strip()
-
-    conn.run(
-        f"/usr/share/elasticsearch/bin/elasticsearch-certutil cert --ip {conn.host}"
-        f" --name {hostname} --out certificate-bundle.zip --pem",
-        hide="stdout",
-    )
-
     conn.run("mkdir /etc/elasticsearch/certs", hide="stdout")
-    conn.run(
-        "mv /usr/share/elasticsearch/certificate-bundle.zip /etc/elasticsearch/certs/",
-        hide="stdout",
-    )
-    conn.run(
-        "unzip /etc/elasticsearch/certs/certificate-bundle.zip"
-        " -d /etc/elasticsearch/certs/",
-        hide="stdout",
-    )
-    logger.info("Created and unzipped elasticsearch certificates")
 
+    # will have to look into auto-renewing certificates
+    # https://www.digitalocean.com/community/tutorials/how-to-use-certbot-standalone-mode-to-retrieve-let-s-encrypt-ssl-certificates-on-debian-10
+    conn.run(
+        f"certbot certonly --standalone -d {conn.host} --non-interactive"
+        f" --agree-tos --email {email}",
+        hide="stdout",
+    )
+
+    # tried to symlink these instead, but kept on getting permission errors in ES logs
+    conn.run(
+        "cp /etc/letsencrypt/live/{conn.host}/* /etc/elasticsearch/certs/",
+        hide="stdout",
+    )
+    logger.info("Created elasticsearch certificates")
+
+    # avoid hardcoding this
     ymlConfig = createElasticsearchYml(
-        f"certs/{hostname}/{hostname}.key",
-        f"certs/{hostname}/{hostname}.crt",
-        "certs/ca/ca.crt",
+        "/etc/elasticsearch/certs/privkey.pem",
+        "/etc/elasticsearch/certs/cert.pem",
+        "/etc/elasticsearch/certs/fullchain.pem",
     )
 
     conn.run(
@@ -211,6 +212,6 @@ if __name__ == "__main__":
         host="134.122.8.182", user="root", connect_kwargs={"password": sensorPass}
     )
 
-    installTPot(sensorConn, logConn, logger)
+    # installTPot(sensorConn, logConn, logger)
     # installConfigureElasticsearch(logConn, logger)
     # configureKibana(logConn, logger)
