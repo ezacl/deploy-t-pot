@@ -1,9 +1,9 @@
-def createElasticsearchYml(pathToKey, pathToCrt, pathToCaCrt):
+def createElasticsearchYml(pathToPrivKey, pathToHostCert, pathToFullCert):
     """TODO: Docstring for createElasticsearchYml.
 
-    :pathToKey: TODO
-    :pathToCrt: TODO
-    :pathToCaCrt: TODO
+    :pathToPrivKey: TODO
+    :pathToHostCert: TODO
+    :pathToFullCert: TODO
     :returns: TODO
 
     """
@@ -21,17 +21,16 @@ xpack.security.enabled: true
 
 xpack.security.transport.ssl.enabled: true
 xpack.security.transport.ssl.verification_mode: certificate
-xpack.security.transport.ssl.key: {pathToKey}
-xpack.security.transport.ssl.certificate: {pathToCrt}
-xpack.security.transport.ssl.certificate_authorities: [ \\"{pathToCaCrt}\\" ]
+xpack.security.transport.ssl.key: {pathToPrivKey}
+xpack.security.transport.ssl.certificate: {pathToHostCert}
+xpack.security.transport.ssl.certificate_authorities: [ \\"{pathToFullCert}\\" ]
 
 # client to node communication
 
 xpack.security.http.ssl.enabled: true
 xpack.security.http.ssl.verification_mode: certificate
-xpack.security.http.ssl.key: {pathToKey}
-xpack.security.http.ssl.certificate: {pathToCrt}
-xpack.security.http.ssl.certificate_authorities: [ \\"{pathToCaCrt}\\" ]
+xpack.security.http.ssl.key: {pathToPrivKey}
+xpack.security.http.ssl.certificate: {pathToFullCert}
 
 # Workaround for logstash error Encountered a retryable error. Will retry with exponential backoff
 
@@ -40,27 +39,29 @@ http.max_content_length: 1gb"""
     return configurationOptions
 
 
-def createKibanaYml(ipAddress, kibanaPwd, pathToKey, pathToCrt, pathToCaCrt):
+def createKibanaYml(ipAddress, kibanaSystemPwd, pathToPrivKey, pathToHostCert):
     """TODO: Docstring for createKibanaYml.
 
     :ipAddress: TODO
-    :kibanaPwd: TODO
-    :pathToKey: TODO
-    :pathToCrt: TODO
-    :pathToCaCrt: TODO
+    :kibanaSystemPwd: TODO
+    :pathToPrivKey: TODO
+    :pathToHostCert: TODO
     :returns: TODO
 
     """
 
     configurationOptions = f"""
 # T-Pot Distributed Options
+
 server.port: 5601
 server.host: \\"0.0.0.0\\"
+
+server.ssl.enabled: true
+server.ssl.certificate: {pathToHostCert}
+server.ssl.key: {pathToPrivKey}
+
 elasticsearch.hosts: [\\"https://{ipAddress}:64298\\"]
-elasticsearch.username: \\"kibana\\"
-elasticsearch.password: \\"{kibanaPwd}\\"
-elasticsearch.ssl.certificate: {pathToCrt}
-elasticsearch.ssl.key: {pathToKey}
-elasticsearch.ssl.certificateAuthorities: [\\"{pathToCaCrt}\\"]"""
+elasticsearch.username: \\"kibana_system\\"
+elasticsearch.password: \\"{kibanaSystemPwd}\\\""""
 
     return configurationOptions

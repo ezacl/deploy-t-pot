@@ -17,8 +17,8 @@ def installTPot(sensorConn, loggingConn, logger):
     :returns: None
 
     """
-    sensorConn.run("apt-get update && apt-get --yes upgrade", hide="stdout")
-    sensorConn.run("apt-get --yes install git", hide="stdout")
+    sensorConn.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
+    sensorConn.run("apt-get --yes install git", pty=True, hide="stdout")
     logger.info("Updated packages and installed git")
 
     sensorConn.run(
@@ -47,12 +47,13 @@ def installTPot(sensorConn, loggingConn, logger):
     loggingConn.get("/etc/elasticsearch/certs/ca/ca.crt")
     sensorConn.put("ca.crt", remote="/data/elk/ca.crt")
     os.remove("ca.crt")
+    logger.info("Copied certificates from logging server")
 
     # rebooting server always throws an exception, so ignore
     try:
         sensorConn.run("reboot", hide="stdout")
     except UnexpectedExit:
-        pass
+        logger.info("Installed T-Pot and rebooted sensor server")
 
 
 def installConfigureElasticsearch(conn, logger):
@@ -63,8 +64,10 @@ def installConfigureElasticsearch(conn, logger):
     :returns: TODO
 
     """
-    conn.run("apt-get update && apt-get --yes upgrade", hide="stdout")
-    conn.run("apt-get --yes install gnupg apt-transport-https unzip", hide="stdout")
+    conn.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
+    conn.run(
+        "apt-get --yes install gnupg apt-transport-https unzip", pty=True, hide="stdout"
+    )
     conn.run(
         "wget https://raw.githubusercontent.com/ezacl/"
         "tpotce-light/slim-standard/.vimrc",
@@ -147,7 +150,7 @@ def configureKibana(conn, logger):
         watchers=[pwdSetupYes],
     )
     pwdFile = "elasticsearch_passwords.txt"
-    logger.info(f"Generated ELK passwords, writing them to {pwdFile}.")
+    logger.info(f"Generated ELK passwords, writing them to {pwdFile}")
 
     pwdRes = autoPasswords.stdout.strip()
 
@@ -168,7 +171,7 @@ def configureKibana(conn, logger):
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
     conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
-    logger.info("Copied elasticsearch certificates to /etc/kibana.")
+    logger.info("Copied elasticsearch certificates to /etc/kibana")
 
     hostname = conn.run("hostname", hide="stdout").stdout.strip()
 
@@ -185,6 +188,7 @@ def configureKibana(conn, logger):
 
     conn.run("systemctl restart elasticsearch.service", hide="stdout")
     conn.run("systemctl start kibana.service", hide="stdout")
+    logger.info("Started elasticsearch and kibana services with systemd")
 
 
 if __name__ == "__main__":
@@ -198,10 +202,13 @@ if __name__ == "__main__":
 
     sensorPass = os.environ.get("SENSOR_PASS")
     logConn = Connection(
-        host="167.71.246.62", user="root", connect_kwargs={"password": sensorPass}
+        host="134.122.8.5", user="root", connect_kwargs={"password": sensorPass}
     )
+    # sensorConn = Connection(
+    #     host="167.71.101.194", user="root", connect_kwargs={"password": sensorPass}
+    # )
     sensorConn = Connection(
-        host="167.71.101.194", user="root", connect_kwargs={"password": sensorPass}
+        host="134.122.8.182", user="root", connect_kwargs={"password": sensorPass}
     )
 
     installTPot(sensorConn, logConn, logger)

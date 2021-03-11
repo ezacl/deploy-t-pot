@@ -3,6 +3,7 @@ __pycache__
 
 *.log
 *.txt
+*.yml
 logstash.conf
 
 venv
