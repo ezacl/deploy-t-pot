@@ -110,9 +110,10 @@ def installConfigureElasticsearch(conn, email, logger):
 
     # tried to symlink these instead, but kept on getting permission errors in ES logs
     conn.run(
-        "cp /etc/letsencrypt/live/{conn.host}/* /etc/elasticsearch/certs/",
+        f"cp /etc/letsencrypt/live/{conn.host}/* /etc/elasticsearch/certs/",
         hide="stdout",
     )
+    conn.run("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide="stdout")
     logger.info("Created elasticsearch certificates")
 
     # avoid hardcoding this
@@ -135,6 +136,8 @@ def configureKibana(conn, logger):
     """Configure Kibana on logging server to connect it with Elasticsearch
 
     ### MUST RUN installConfigureElasticsearch BEFORE (AND PROBABLY WAIT AFTER) ###
+
+    should try to set up wait-for to be able to confidently run this function
 
     :conn: TODO
     :logger: TODO
@@ -159,8 +162,8 @@ def configureKibana(conn, logger):
         f.write(pwdRes)
 
     try:
-        # extract password for kibana user to put in kibana.yml
-        kibanaPwdSearch = "PASSWORD kibana = "
+        # extract password for kibana_system user to put in kibana.yml
+        kibanaPwdSearch = "PASSWORD kibana_system = "
 
         startInd = pwdRes.index(kibanaPwdSearch) + len(kibanaPwdSearch)
         trimmedPwd = pwdRes[startInd:]
@@ -168,20 +171,20 @@ def configureKibana(conn, logger):
 
         kibanaPass = trimmedPwd[:endInd].strip()
     except ValueError:
-        raise Exception("Kibana password not created by elasticsearch-setup-passwords")
+        raise Exception(
+            "kibana_system password not created by elasticsearch-setup-passwords"
+        )
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
     conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
     logger.info("Copied elasticsearch certificates to /etc/kibana")
 
-    hostname = conn.run("hostname", hide="stdout").stdout.strip()
-
+    # avoid hardcoding paths again
     ymlConfig = createKibanaYml(
         conn.host,
         kibanaPass,
-        f"/etc/kibana/certs/{hostname}/{hostname}.key",
-        f"/etc/kibana/certs/{hostname}/{hostname}.crt",
-        "/etc/kibana/certs/ca/ca.crt",
+        "/etc/kibana/certs/privkey.pem",
+        "/etc/kibana/certs/cert.pem",
     )
 
     conn.run(f'echo -e "{ymlConfig}" >> /etc/kibana/kibana.yml', hide="stdout")
@@ -190,6 +193,18 @@ def configureKibana(conn, logger):
     conn.run("systemctl restart elasticsearch.service", hide="stdout")
     conn.run("systemctl start kibana.service", hide="stdout")
     logger.info("Started elasticsearch and kibana services with systemd")
+
+
+def createTPotUser(conn):
+    """TODO: Docstring for createTPotUser.
+
+    :conn: TODO
+    :returns: TODO
+
+    """
+    # create the logstash_writer and logstash_internal role and user, respectively
+    # see createRoles.txt
+    pass
 
 
 if __name__ == "__main__":
@@ -201,9 +216,11 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger(__name__)
 
+    logHost = os.environ.get("LOGGING_HOST")
+    email = os.environ.get("LOGGING_EMAIL")
     sensorPass = os.environ.get("SENSOR_PASS")
     logConn = Connection(
-        host="134.122.8.5", user="root", connect_kwargs={"password": sensorPass}
+        host=logHost, user="root", connect_kwargs={"password": sensorPass}
     )
     # sensorConn = Connection(
     #     host="167.71.101.194", user="root", connect_kwargs={"password": sensorPass}
@@ -213,5 +230,5 @@ if __name__ == "__main__":
     )
 
     # installTPot(sensorConn, logConn, logger)
-    # installConfigureElasticsearch(logConn, logger)
-    # configureKibana(logConn, logger)
+    # installConfigureElasticsearch(logConn, email, logger)
+    configureKibana(logConn, logger)
