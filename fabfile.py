@@ -231,4 +231,4 @@ if __name__ == "__main__":
 
     # installTPot(sensorConn, logConn, logger)
     # installConfigureElasticsearch(logConn, email, logger)
-    configureKibana(logConn, logger)
+    # configureKibana(logConn, logger)
