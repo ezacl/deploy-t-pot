@@ -5,7 +5,9 @@ from fabric import Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
-from configFuncs import createElasticsearchYml, createKibanaYml
+from configFuncs import (createElasticsearchYml, createKibanaYml,
+                         createTPotRole, createTPotUser)
+from utils import findPassword, waitForService
 
 
 def installTPot(sensorConn, loggingConn, logger):
@@ -137,8 +139,6 @@ def configureKibana(conn, logger):
 
     ### MUST RUN installConfigureElasticsearch BEFORE (AND PROBABLY WAIT AFTER) ###
 
-    should try to set up wait-for to be able to confidently run this function
-
     :conn: TODO
     :logger: TODO
     :returns: TODO
@@ -161,19 +161,8 @@ def configureKibana(conn, logger):
     with open(pwdFile, "w") as f:
         f.write(pwdRes)
 
-    try:
-        # extract password for kibana_system user to put in kibana.yml
-        kibanaPwdSearch = "PASSWORD kibana_system = "
-
-        startInd = pwdRes.index(kibanaPwdSearch) + len(kibanaPwdSearch)
-        trimmedPwd = pwdRes[startInd:]
-        endInd = trimmedPwd.index("\n")
-
-        kibanaPass = trimmedPwd[:endInd].strip()
-    except ValueError:
-        raise Exception(
-            "kibana_system password not created by elasticsearch-setup-passwords"
-        )
+    kibanaPass = findPassword(pwdRes, "kibana_system")
+    elasticPass = findPassword(pwdRes, "elastic")
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
     conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
@@ -194,17 +183,27 @@ def configureKibana(conn, logger):
     conn.run("systemctl start kibana.service", hide="stdout")
     logger.info("Started elasticsearch and kibana services with systemd")
 
+    return elasticPass
 
-def createTPotUser(conn):
-    """TODO: Docstring for createTPotUser.
 
-    :conn: TODO
+def configureLoggingServer(connection, email, logger):
+    """TODO: Docstring for configureLoggingServer.
+
+    :connection: TODO
+    :email: TODO
+    :logger: TODO
     :returns: TODO
 
     """
-    # create the logstash_writer and logstash_internal role and user, respectively
-    # see createRoles.txt
-    pass
+    installConfigureElasticsearch(connection, email, logger)
+
+    waitForService(connection.host, 64298)
+
+    elasticPass = configureKibana(connection, logger)
+
+    waitForService(connection.host, 64298)
+
+    createTPotUser(f"{connection.host}:64298", "elastic", elasticPass)
 
 
 if __name__ == "__main__":

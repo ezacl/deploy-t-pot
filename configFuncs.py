@@ -1,7 +1,11 @@
+import secrets
+import string
 from pprint import pprint
 
 import requests
 from requests.exceptions import HTTPError
+
+from utils import findPassword
 
 
 def createElasticsearchYml(pathToPrivKey, pathToHostCert, pathToFullCert):
@@ -73,12 +77,12 @@ elasticsearch.password: \\"{kibanaSystemPwd}\\\""""
     return configurationOptions
 
 
-def createTPotRole(hostPort, user, password):
+def createTPotRole(hostPort, creatorUser, creatorPwd):
     """TODO: Docstring for createTPotRole.
 
     :hostPort: TODO
-    :user: TODO
-    :password: TODO
+    :creatorUser: TODO
+    :creatorPwd: TODO
     :returns: TODO
 
     """
@@ -112,7 +116,7 @@ def createTPotRole(hostPort, user, password):
 
     roleResp = requests.post(
         f"https://{hostPort}/_security/role/{roleName}",
-        auth=(user, password),
+        auth=(creatorUser, creatorPwd),
         json=roleData,
     )
 
@@ -128,24 +132,37 @@ def createTPotRole(hostPort, user, password):
     return roleName
 
 
-def createTPotUser(hostPort, user, password, roleName, userPass):
+def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
     """TODO: Docstring for createTPotUser.
 
     :hostPort: TODO
-    :user: TODO
-    :password: TODO
-    :roleName: TODO
-    :roleName: TODO
+    :creatorUser: TODO
+    :creatorPwd: TODO
+    :createdPwd: TODO
     :returns: TODO
 
     """
+    if creatorPwd is None:
+        # try to find user password in text file if password not specified
+        with open("elasticsearch_passwords.txt") as f:
+            creatorPwd = findPassword(f.read(), creatorUser)
+
     userName = "t_pot_internal"
+    roleName = createTPotRole(hostPort, creatorUser, creatorPwd)
+
+    # generate random password if none specified
+    if createdPwd is None:
+        createdPwd = "".join(
+            secrets.choice(string.ascii_letters + string.digits) for _ in range(20)
+        )
+
+        print(f"Password for user {userName}: {createdPwd}")
 
     userData = {
         "roles": [
             roleName,
         ],
-        "password": userPass,
+        "password": createdPwd,
         "full_name": "",
         "email": "",
         "metadata": {},
@@ -154,7 +171,7 @@ def createTPotUser(hostPort, user, password, roleName, userPass):
 
     userResp = requests.post(
         f"https://{hostPort}/_security/user/{userName}",
-        auth=(user, password),
+        auth=(creatorUser, creatorPwd),
         json=userData,
     )
 
@@ -166,5 +183,3 @@ def createTPotUser(hostPort, user, password, roleName, userPass):
 
     if not userResp.json()["created"]:
         raise Exception(f"{userName} user not created. Does it already exist?")
-
-    return userName
