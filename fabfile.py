@@ -1,12 +1,12 @@
 import logging
 import os
+import time
 
 from fabric import Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
-from configFuncs import (createElasticsearchYml, createKibanaYml,
-                         createTPotRole, createTPotUser)
+from configFuncs import createElasticsearchYml, createKibanaYml, createTPotUser
 from utils import findPassword, waitForService
 
 
@@ -173,7 +173,7 @@ def configureKibana(conn, logger):
         conn.host,
         kibanaPass,
         "/etc/kibana/certs/privkey.pem",
-        "/etc/kibana/certs/cert.pem",
+        "/etc/kibana/certs/fullchain.pem",
     )
 
     conn.run(f'echo -e "{ymlConfig}" >> /etc/kibana/kibana.yml', hide="stdout")
@@ -203,7 +203,20 @@ def configureLoggingServer(connection, email, logger):
 
     waitForService(connection.host, 64298)
 
-    createTPotUser(f"{connection.host}:64298", "elastic", elasticPass)
+    try:
+        tPotUser, tPotPass = createTPotUser(
+            f"{connection.host}:64298", "elastic", elasticPass
+        )
+    # make this a more precise error
+    except Exception:
+        time.sleep(10)
+
+        tPotUser, tPotPass = createTPotUser(
+            f"{connection.host}:64298", "elastic", elasticPass
+        )
+
+    with open("t-pot-password.txt", "w") as f:
+        f.write(f"PASSWORD {tPotUser} = {tPotPass}")
 
 
 if __name__ == "__main__":
@@ -217,17 +230,14 @@ if __name__ == "__main__":
 
     logHost = os.environ.get("LOGGING_HOST")
     email = os.environ.get("LOGGING_EMAIL")
-    sensorPass = os.environ.get("SENSOR_PASS")
+    logPass = os.environ.get("LOGGING_PASS")
+    # sensorPass = os.environ.get("SENSOR_PASS")
+    # sensorHost = os.environ.get("SENSOR_HOST")
     logConn = Connection(
-        host=logHost, user="root", connect_kwargs={"password": sensorPass}
+        host=logHost, user="root", connect_kwargs={"password": logPass}
     )
     # sensorConn = Connection(
-    #     host="167.71.101.194", user="root", connect_kwargs={"password": sensorPass}
+    #     host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
     # )
-    sensorConn = Connection(
-        host="134.122.8.182", user="root", connect_kwargs={"password": sensorPass}
-    )
 
-    # installTPot(sensorConn, logConn, logger)
-    # installConfigureElasticsearch(logConn, email, logger)
-    # configureKibana(logConn, logger)
+    configureLoggingServer(logConn, email, logger)

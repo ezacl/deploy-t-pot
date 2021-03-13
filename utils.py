@@ -34,10 +34,12 @@ def waitForService(host, port):
         # there must be a way to do this without creating a new socket every time
         monitorSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        # if monitorSock.connect_ex(("localhost", port)) == 0:
-        if monitorSock.connect_ex(("auto-cert.ezacl.dev", port)) == 0:
+        if monitorSock.connect_ex((host, port)) == 0:
             monitorSock.close()
             break
 
         monitorSock.close()
         time.sleep(3)
+
+    # give some extra time after successful connection for service to start up
+    time.sleep(10)

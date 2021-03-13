@@ -49,13 +49,13 @@ http.max_content_length: 1gb"""
     return configurationOptions
 
 
-def createKibanaYml(ipAddress, kibanaSystemPwd, pathToPrivKey, pathToHostCert):
+def createKibanaYml(ipAddress, kibanaSystemPwd, pathToPrivKey, pathToFullCert):
     """TODO: Docstring for createKibanaYml.
 
     :ipAddress: TODO
     :kibanaSystemPwd: TODO
     :pathToPrivKey: TODO
-    :pathToHostCert: TODO
+    :pathToFullCert: TODO
     :returns: TODO
 
     """
@@ -67,7 +67,7 @@ server.port: 5601
 server.host: \\"0.0.0.0\\"
 
 server.ssl.enabled: true
-server.ssl.certificate: {pathToHostCert}
+server.ssl.certificate: {pathToFullCert}
 server.ssl.key: {pathToPrivKey}
 
 elasticsearch.hosts: [\\"https://{ipAddress}:64298\\"]
@@ -183,3 +183,5 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
 
     if not userResp.json()["created"]:
         raise Exception(f"{userName} user not created. Does it already exist?")
+
+    return userName, createdPwd
