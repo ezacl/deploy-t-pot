@@ -1,11 +1,13 @@
 import logging
 import os
+import time
 
 from fabric import Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
-from configFuncs import createElasticsearchYml, createKibanaYml
+from configFuncs import createElasticsearchYml, createKibanaYml, createTPotUser
+from utils import findPassword, waitForService
 
 
 def installTPot(sensorConn, loggingConn, logger):
@@ -56,17 +58,20 @@ def installTPot(sensorConn, loggingConn, logger):
         logger.info("Installed T-Pot and rebooted sensor server")
 
 
-def installConfigureElasticsearch(conn, logger):
+def installConfigureElasticsearch(conn, email, logger):
     """Install ELK stack and configure Elasticsearch on logging server
 
     :conn: TODO
+    :email: TODO
     :logger: TODO
     :returns: TODO
 
     """
     conn.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
     conn.run(
-        "apt-get --yes install gnupg apt-transport-https unzip", pty=True, hide="stdout"
+        "apt-get --yes install gnupg apt-transport-https certbot",
+        pty=True,
+        hide="stdout",
     )
     conn.run(
         "wget https://raw.githubusercontent.com/ezacl/"
@@ -95,30 +100,29 @@ def installConfigureElasticsearch(conn, logger):
     conn.run("apt-get --yes install elasticsearch kibana", pty=True, hide="stdout")
     logger.info("Installed elasticsearch and kibana")
 
-    hostname = conn.run("hostname", hide="stdout").stdout.strip()
-
-    conn.run(
-        f"/usr/share/elasticsearch/bin/elasticsearch-certutil cert --ip {conn.host}"
-        f" --name {hostname} --out certificate-bundle.zip --pem",
-        hide="stdout",
-    )
-
     conn.run("mkdir /etc/elasticsearch/certs", hide="stdout")
-    conn.run(
-        "mv /usr/share/elasticsearch/certificate-bundle.zip /etc/elasticsearch/certs/",
-        hide="stdout",
-    )
-    conn.run(
-        "unzip /etc/elasticsearch/certs/certificate-bundle.zip"
-        " -d /etc/elasticsearch/certs/",
-        hide="stdout",
-    )
-    logger.info("Created and unzipped elasticsearch certificates")
 
+    # will have to look into auto-renewing certificates
+    # https://www.digitalocean.com/community/tutorials/how-to-use-certbot-standalone-mode-to-retrieve-let-s-encrypt-ssl-certificates-on-debian-10
+    conn.run(
+        f"certbot certonly --standalone -d {conn.host} --non-interactive"
+        f" --agree-tos --email {email}",
+        hide="stdout",
+    )
+
+    # tried to symlink these instead, but kept on getting permission errors in ES logs
+    conn.run(
+        f"cp /etc/letsencrypt/live/{conn.host}/* /etc/elasticsearch/certs/",
+        hide="stdout",
+    )
+    conn.run("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide="stdout")
+    logger.info("Created elasticsearch certificates")
+
+    # avoid hardcoding this
     ymlConfig = createElasticsearchYml(
-        f"certs/{hostname}/{hostname}.key",
-        f"certs/{hostname}/{hostname}.crt",
-        "certs/ca/ca.crt",
+        "/etc/elasticsearch/certs/privkey.pem",
+        "/etc/elasticsearch/certs/cert.pem",
+        "/etc/elasticsearch/certs/fullchain.pem",
     )
 
     conn.run(
@@ -157,30 +161,19 @@ def configureKibana(conn, logger):
     with open(pwdFile, "w") as f:
         f.write(pwdRes)
 
-    try:
-        # extract password for kibana user to put in kibana.yml
-        kibanaPwdSearch = "PASSWORD kibana = "
-
-        startInd = pwdRes.index(kibanaPwdSearch) + len(kibanaPwdSearch)
-        trimmedPwd = pwdRes[startInd:]
-        endInd = trimmedPwd.index("\n")
-
-        kibanaPass = trimmedPwd[:endInd].strip()
-    except ValueError:
-        raise Exception("Kibana password not created by elasticsearch-setup-passwords")
+    kibanaPass = findPassword(pwdRes, "kibana_system")
+    elasticPass = findPassword(pwdRes, "elastic")
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
     conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
     logger.info("Copied elasticsearch certificates to /etc/kibana")
 
-    hostname = conn.run("hostname", hide="stdout").stdout.strip()
-
+    # avoid hardcoding paths again
     ymlConfig = createKibanaYml(
         conn.host,
         kibanaPass,
-        f"/etc/kibana/certs/{hostname}/{hostname}.key",
-        f"/etc/kibana/certs/{hostname}/{hostname}.crt",
-        "/etc/kibana/certs/ca/ca.crt",
+        "/etc/kibana/certs/privkey.pem",
+        "/etc/kibana/certs/fullchain.pem",
     )
 
     conn.run(f'echo -e "{ymlConfig}" >> /etc/kibana/kibana.yml', hide="stdout")
@@ -189,6 +182,41 @@ def configureKibana(conn, logger):
     conn.run("systemctl restart elasticsearch.service", hide="stdout")
     conn.run("systemctl start kibana.service", hide="stdout")
     logger.info("Started elasticsearch and kibana services with systemd")
+
+    return elasticPass
+
+
+def configureLoggingServer(connection, email, logger):
+    """TODO: Docstring for configureLoggingServer.
+
+    :connection: TODO
+    :email: TODO
+    :logger: TODO
+    :returns: TODO
+
+    """
+    installConfigureElasticsearch(connection, email, logger)
+
+    waitForService(connection.host, 64298)
+
+    elasticPass = configureKibana(connection, logger)
+
+    waitForService(connection.host, 64298)
+
+    try:
+        tPotUser, tPotPass = createTPotUser(
+            f"{connection.host}:64298", "elastic", elasticPass
+        )
+    # make this a more precise error
+    except Exception:
+        time.sleep(10)
+
+        tPotUser, tPotPass = createTPotUser(
+            f"{connection.host}:64298", "elastic", elasticPass
+        )
+
+    with open("t-pot-password.txt", "w") as f:
+        f.write(f"PASSWORD {tPotUser} = {tPotPass}")
 
 
 if __name__ == "__main__":
@@ -200,17 +228,16 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger(__name__)
 
-    sensorPass = os.environ.get("SENSOR_PASS")
+    logHost = os.environ.get("LOGGING_HOST")
+    email = os.environ.get("LOGGING_EMAIL")
+    logPass = os.environ.get("LOGGING_PASS")
+    # sensorPass = os.environ.get("SENSOR_PASS")
+    # sensorHost = os.environ.get("SENSOR_HOST")
     logConn = Connection(
-        host="134.122.8.5", user="root", connect_kwargs={"password": sensorPass}
+        host=logHost, user="root", connect_kwargs={"password": logPass}
     )
     # sensorConn = Connection(
-    #     host="167.71.101.194", user="root", connect_kwargs={"password": sensorPass}
+    #     host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
     # )
-    sensorConn = Connection(
-        host="134.122.8.182", user="root", connect_kwargs={"password": sensorPass}
-    )
 
-    installTPot(sensorConn, logConn, logger)
-    # installConfigureElasticsearch(logConn, logger)
-    # configureKibana(logConn, logger)
+    configureLoggingServer(logConn, email, logger)
