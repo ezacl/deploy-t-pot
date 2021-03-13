@@ -6,7 +6,8 @@ from fabric import Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
-from configFuncs import createElasticsearchYml, createKibanaYml, createTPotUser
+from configFuncs import (createElasticsearchYml, createKibanaYml,
+                         createTPotUser, importKibanaObjects)
 from utils import findPassword, waitForService
 
 
@@ -217,6 +218,10 @@ def configureLoggingServer(connection, email, logger):
 
     with open("t-pot-password.txt", "w") as f:
         f.write(f"PASSWORD {tPotUser} = {tPotPass}")
+
+    importKibanaObjects(
+        f"{connection.host}:5601", "elastic", elasticPass, "kibanaTemplate.ndjson"
+    )
 
 
 if __name__ == "__main__":

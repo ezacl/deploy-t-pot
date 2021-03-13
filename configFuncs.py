@@ -185,3 +185,27 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
         raise Exception(f"{userName} user not created. Does it already exist?")
 
     return userName, createdPwd
+
+
+def importKibanaObjects(hostPort, userName, password, objectFile):
+    """TODO: Docstring for importKibanaObjects.
+
+    :hostPort: TODO
+    :userName: TODO
+    :password: TODO
+    :objectFile: TODO
+    :returns: TODO
+
+    """
+    importFile = {"file": open(objectFile)}
+    authTup = (userName, password)
+
+    importResp = requests.post(
+        f"https://{hostPort}/api/saved_objects/_import",
+        params={"overwrite": "true"},
+        headers={"kbn-xsrf": "true"},
+        auth=authTup,
+        files=importFile,
+    )
+
+    importResp.raise_for_status()
