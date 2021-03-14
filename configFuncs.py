@@ -17,39 +17,22 @@ def createElasticsearchYml(pathToPrivKey, pathToHostCert, pathToFullCert):
     :returns: TODO
 
     """
-    configurationOptions = f"""#
-# ----------------------- T-Pot Distributed Options ----------------------
-#
-cluster.name: t-pot-central
-node.name: node1
-network.host: 0.0.0.0
-http.port: 64298
-cluster.initial_master_nodes: ["node1"]
-xpack.security.enabled: true
+    with open("configFiles/elasticsearch.yml.template") as f:
+        elasticYml = f.read()
 
-# internode communication (required if xpack.security is enabled)
+    elasticYml = elasticYml.replace("PATH_TO_PRIV_KEY", pathToPrivKey)
+    elasticYml = elasticYml.replace("PATH_TO_HOST_CERT", pathToHostCert)
+    elasticYml = elasticYml.replace("PATH_TO_FULL_CERT", pathToFullCert)
 
-xpack.security.transport.ssl.enabled: true
-xpack.security.transport.ssl.verification_mode: certificate
-xpack.security.transport.ssl.key: {pathToPrivKey}
-xpack.security.transport.ssl.certificate: {pathToHostCert}
-xpack.security.transport.ssl.certificate_authorities: [ \\"{pathToFullCert}\\" ]
+    destFile = "configFiles/elasticsearch.yml"
 
-# client to node communication
+    with open(destFile, "w") as f:
+        f.write(elasticYml)
 
-xpack.security.http.ssl.enabled: true
-xpack.security.http.ssl.verification_mode: certificate
-xpack.security.http.ssl.key: {pathToPrivKey}
-xpack.security.http.ssl.certificate: {pathToFullCert}
-
-# Workaround for logstash error Encountered a retryable error. Will retry with exponential backoff
-
-http.max_content_length: 1gb"""
-
-    return configurationOptions
+    return destFile
 
 
-def createKibanaYml(ipAddress, kibanaSystemPwd, pathToPrivKey, pathToFullCert):
+def createKibanaYml(domainName, kibanaSystemPwd, pathToPrivKey, pathToFullCert):
     """TODO: Docstring for createKibanaYml.
 
     :ipAddress: TODO
@@ -59,22 +42,42 @@ def createKibanaYml(ipAddress, kibanaSystemPwd, pathToPrivKey, pathToFullCert):
     :returns: TODO
 
     """
+    with open("configFiles/kibana.yml.template") as f:
+        elasticYml = f.read()
 
-    configurationOptions = f"""
-# T-Pot Distributed Options
+    elasticYml = elasticYml.replace("PATH_TO_FULL_CERT", pathToFullCert)
+    elasticYml = elasticYml.replace("PATH_TO_PRIV_KEY", pathToPrivKey)
+    elasticYml = elasticYml.replace("LOGGING_FQDN_HERE", domainName)
+    elasticYml = elasticYml.replace("KIBANA_SYSTEM_PASSWORD", kibanaSystemPwd)
 
-server.port: 5601
-server.host: \\"0.0.0.0\\"
+    destFile = "configFiles/kibana.yml"
 
-server.ssl.enabled: true
-server.ssl.certificate: {pathToFullCert}
-server.ssl.key: {pathToPrivKey}
+    with open(destFile, "w") as f:
+        f.write(elasticYml)
 
-elasticsearch.hosts: [\\"https://{ipAddress}:64298\\"]
-elasticsearch.username: \\"kibana_system\\"
-elasticsearch.password: \\"{kibanaSystemPwd}\\\""""
+    return destFile
 
-    return configurationOptions
+
+def createLogstashConf(domain, certPath, user, password):
+    """TODO: Docstring for createLogstashConf.
+
+    :domain: TODO
+    :certPath: TODO
+    :user: TODO
+    :password: TODO
+    :returns: TODO
+
+    """
+    with open("configFiles/logstash.conf.template") as f:
+        logConf = f.read()
+
+    logConf = logConf.replace("LOGGING_FQDN_HERE", domain)
+    logConf = logConf.replace("LOGGING_CERT_PATH_HERE", certPath)
+    logConf = logConf.replace("LOGGING_USER_HERE", user)
+    logConf = logConf.replace("LOGGING_PASSWORD_HERE", password)
+
+    with open("configFiles/logstash.conf", "w") as f:
+        f.write(logConf)
 
 
 def createTPotRole(hostPort, creatorUser, creatorPwd):
@@ -144,7 +147,7 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
     """
     if creatorPwd is None:
         # try to find user password in text file if password not specified
-        with open("elasticsearch_passwords.txt") as f:
+        with open("passwords.txt") as f:
             creatorPwd = findPassword(f.read(), creatorUser)
 
     userName = "t_pot_internal"
@@ -208,4 +211,8 @@ def importKibanaObjects(hostPort, userName, password, objectFile):
         files=importFile,
     )
 
-    importResp.raise_for_status()
+    try:
+        importResp.raise_for_status()
+    except HTTPError:
+        print(importResp.text)
+        raise Exception("Bad API request. See response above.")

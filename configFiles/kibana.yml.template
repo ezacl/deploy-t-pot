@@ -1,0 +1,12 @@
+# T-Pot Distributed Options
+
+server.port: 5601
+server.host: "0.0.0.0"
+
+server.ssl.enabled: true
+server.ssl.certificate: PATH_TO_FULL_CERT
+server.ssl.key: PATH_TO_PRIV_KEY
+
+elasticsearch.hosts: ["https://LOGGING_FQDN_HERE:64298"]
+elasticsearch.username: "kibana_system"
+elasticsearch.password: "KIBANA_SYSTEM_PASSWORD"

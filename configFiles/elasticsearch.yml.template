@@ -1,0 +1,37 @@
+# ----------------------------------- Paths ------------------------------------
+#
+# Path to directory where to store the data (separate multiple locations by comma):
+#
+path.data: /var/lib/elasticsearch
+#
+# Path to log files:
+#
+path.logs: /var/log/elasticsearch
+#
+# ----------------------- T-Pot Distributed Options ----------------------
+#
+cluster.name: t-pot-central
+node.name: node1
+network.host: 0.0.0.0
+http.port: 64298
+cluster.initial_master_nodes: ["node1"]
+xpack.security.enabled: true
+
+# internode communication (required if xpack.security is enabled)
+
+xpack.security.transport.ssl.enabled: true
+xpack.security.transport.ssl.verification_mode: certificate
+xpack.security.transport.ssl.key: PATH_TO_PRIV_KEY
+xpack.security.transport.ssl.certificate: PATH_TO_HOST_CERT
+xpack.security.transport.ssl.certificate_authorities: [ "PATH_TO_FULL_CERT" ]
+
+# client to node communication
+
+xpack.security.http.ssl.enabled: true
+xpack.security.http.ssl.verification_mode: certificate
+xpack.security.http.ssl.key: PATH_TO_PRIV_KEY
+xpack.security.http.ssl.certificate: PATH_TO_FULL_CERT
+
+# Workaround for logstash error Encountered a retryable error. Will retry with exponential backoff
+
+http.max_content_length: 1gb
