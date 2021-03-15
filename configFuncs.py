@@ -1,6 +1,5 @@
 import secrets
 import string
-from pprint import pprint
 
 import requests
 from requests.exceptions import HTTPError
@@ -9,12 +8,13 @@ from utils import findPassword
 
 
 def createElasticsearchYml(pathToPrivKey, pathToHostCert, pathToFullCert):
-    """TODO: Docstring for createElasticsearchYml.
+    """Create elasticsearch.yml file for logging server from
+    configFiles/elasticsearch.yml.template
 
-    :pathToPrivKey: TODO
-    :pathToHostCert: TODO
-    :pathToFullCert: TODO
-    :returns: TODO
+    :pathToPrivKey: path to SSL private key on logging server
+    :pathToHostCert: path to host SSL certificate on logging server
+    :pathToFullCert: path to full SSL certificate on logging server
+    :returns: path to newly-created elasticsearch.yml file
 
     """
     with open("configFiles/elasticsearch.yml.template") as f:
@@ -33,13 +33,14 @@ def createElasticsearchYml(pathToPrivKey, pathToHostCert, pathToFullCert):
 
 
 def createKibanaYml(domainName, kibanaSystemPwd, pathToPrivKey, pathToFullCert):
-    """TODO: Docstring for createKibanaYml.
+    """Create kibana.yml file for logging server from configFiles/kibana.yml.template
 
-    :ipAddress: TODO
-    :kibanaSystemPwd: TODO
-    :pathToPrivKey: TODO
-    :pathToFullCert: TODO
-    :returns: TODO
+    :domainName: FQDN of logging server
+    :kibanaSystemPwd: password to kibana_system user (created by
+    elasticsearch-setup-passwords)
+    :pathToPrivKey: path to SSL private key on logging server
+    :pathToFullCert: path to full SSL certificate on logging server
+    :returns: path to newly-created kibana.yml file
 
     """
     with open("configFiles/kibana.yml.template") as f:
@@ -58,20 +59,21 @@ def createKibanaYml(domainName, kibanaSystemPwd, pathToPrivKey, pathToFullCert):
     return destFile
 
 
-def createLogstashConf(domain, certPath, user, password):
-    """TODO: Docstring for createLogstashConf.
+def createLogstashConf(domainName, certPath, user, password):
+    """Create logstash.conf file for sensor servers from
+    configFiles/logstash.conf.template
 
-    :domain: TODO
-    :certPath: TODO
-    :user: TODO
-    :password: TODO
-    :returns: TODO
+    :domainName: FQDN of logging server
+    :certPath: path to full SSL certificate on sensor server
+    :user: user who has t_pot_writer elasticsearch role (usually t_pot_internal)
+    :password: password to above user
+    :returns: None
 
     """
     with open("configFiles/logstash.conf.template") as f:
         logConf = f.read()
 
-    logConf = logConf.replace("LOGGING_FQDN_HERE", domain)
+    logConf = logConf.replace("LOGGING_FQDN_HERE", domainName)
     logConf = logConf.replace("LOGGING_CERT_PATH_HERE", certPath)
     logConf = logConf.replace("LOGGING_USER_HERE", user)
     logConf = logConf.replace("LOGGING_PASSWORD_HERE", password)
@@ -81,16 +83,18 @@ def createLogstashConf(domain, certPath, user, password):
 
 
 def createTPotRole(hostPort, creatorUser, creatorPwd):
-    """TODO: Docstring for createTPotRole.
+    """Create t_pot_writer elasticsearch role for sensor servers with correct
+    permissions to send honeypot data to logging server
 
-    :hostPort: TODO
-    :creatorUser: TODO
-    :creatorPwd: TODO
-    :returns: TODO
+    :hostPort: elasticsearch FQDN and port, in form FQDN:port
+    :creatorUser: user with which to make API requests (usually elastic)
+    :creatorPwd: password to above user
+    :returns: name of role created
 
     """
     roleName = "t_pot_writer"
 
+    # permissions needed to send honeypot data
     roleData = {
         "cluster": [
             "manage_index_templates",
@@ -126,9 +130,11 @@ def createTPotRole(hostPort, creatorUser, creatorPwd):
     try:
         roleResp.raise_for_status()
     except HTTPError:
-        pprint(roleResp.json())
+        # Usually if API request is made before elasticsearch service is ready
+        print(roleResp.text)
         raise Exception("Bad API request. See response above.")
 
+    # creating the same role twice will not change anything
     if not roleResp.json()["role"]["created"]:
         raise Exception(f"{roleName} role not created. Does it already exist?")
 
@@ -136,13 +142,16 @@ def createTPotRole(hostPort, creatorUser, creatorPwd):
 
 
 def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
-    """TODO: Docstring for createTPotUser.
+    """Create t_pot_internal elasticsearch user for sensor servers
+    with t_pot_writer role
 
-    :hostPort: TODO
-    :creatorUser: TODO
-    :creatorPwd: TODO
-    :createdPwd: TODO
-    :returns: TODO
+    :hostPort: elasticsearch FQDN and port, in form FQDN:port
+    :creatorUser: user with which to make API requests (usually elastic)
+    :creatorPwd: optional, password to above user. If left blank, will try to look in
+    passwords.txt
+    :createdPwd: optional, password for t_pot_internal user to be created. If left
+    blank, will generate a random password
+    :returns: name of created user and corresponding password
 
     """
     if creatorPwd is None:
@@ -151,6 +160,7 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
             creatorPwd = findPassword(f.read(), creatorUser)
 
     userName = "t_pot_internal"
+    # first create role to assign to user
     roleName = createTPotRole(hostPort, creatorUser, creatorPwd)
 
     # generate random password if none specified
@@ -181,9 +191,11 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
     try:
         userResp.raise_for_status()
     except HTTPError:
-        pprint(userResp.json())
+        # Usually if API request is made before elasticsearch service is ready
+        print(userResp.text)
         raise Exception("Bad API request. See response above.")
 
+    # creating the same user twice will not change anything
     if not userResp.json()["created"]:
         raise Exception(f"{userName} user not created. Does it already exist?")
 
@@ -191,13 +203,15 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
 
 
 def importKibanaObjects(hostPort, userName, password, objectFile):
-    """TODO: Docstring for importKibanaObjects.
+    """Convenience function to programmatically import nice T-Pot attack visualizations
+    in kibana. Note that the /api/saved_objects/_import endpoint is experimental in
+    ELK 7.11, so this may not work with future versions.
 
-    :hostPort: TODO
-    :userName: TODO
-    :password: TODO
-    :objectFile: TODO
-    :returns: TODO
+    :hostPort: elasticsearch FQDN and port, in form FQDN:port
+    :userName: user with which to make API requests (usually elastic)
+    :password: password to above user
+    :objectFile: path to .ndjson file with kibana objects export
+    :returns: None
 
     """
     importFile = {"file": open(objectFile)}
@@ -214,5 +228,6 @@ def importKibanaObjects(hostPort, userName, password, objectFile):
     try:
         importResp.raise_for_status()
     except HTTPError:
+        # Usually if API request is made before kibana service is ready
         print(importResp.text)
         raise Exception("Bad API request. See response above.")

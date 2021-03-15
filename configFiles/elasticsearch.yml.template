@@ -8,7 +8,7 @@ path.data: /var/lib/elasticsearch
 #
 path.logs: /var/log/elasticsearch
 #
-# ----------------------- T-Pot Distributed Options ----------------------
+# ------------------------- T-Pot Distributed Options --------------------------
 #
 cluster.name: t-pot-central
 node.name: node1

@@ -1,4 +1,4 @@
-# T-Pot Distributed Options
+# ------------------------- T-Pot Distributed Options --------------------------
 
 server.port: 5601
 server.host: "0.0.0.0"
