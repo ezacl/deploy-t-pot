@@ -127,9 +127,6 @@ def installConfigureElasticsearch(conn, email, logger):
         "/etc/elasticsearch/certs/fullchain.pem",
     )
 
-    # conn.run(
-    #     f'echo -e "{ymlConfigPath}" >> /etc/elasticsearch/elasticsearch.yml', hide="stdout"
-    # )
     conn.put(ymlConfigPath, remote="/etc/elasticsearch/elasticsearch.yml")
     logger.info("Edited /etc/elasticsearch/elasticsearch.yml")
 
@@ -179,7 +176,6 @@ def configureKibana(conn, logger):
         "/etc/kibana/certs/fullchain.pem",
     )
 
-    # conn.run(f'echo -e "{ymlConfigPath}" >> /etc/kibana/kibana.yml', hide="stdout")
     conn.put(ymlConfigPath, remote="/etc/kibana/kibana.yml")
     logger.info("Edited /etc/kibana/kibana.yml")
 
@@ -251,9 +247,9 @@ if __name__ == "__main__":
     logConn = Connection(
         host=logHost, user="root", connect_kwargs={"password": logPass}
     )
-    # sensorConn = Connection(
-    #     host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
-    # )
+    sensorConn = Connection(
+        host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
+    )
 
     configureLoggingServer(logConn, email, logger)
-    # installTPot(sensorConn, logConn, logger)
+    installTPot(sensorConn, logConn, logger)
