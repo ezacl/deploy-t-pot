@@ -480,15 +480,15 @@ if "_grokparsefailure" in [tags] { drop {} }
 # Output section
 output {
   elasticsearch {
-    hosts => ["https://elasticsearch_fqdn_or_ip:64298"]
+    hosts => ["https://LOGGING_FQDN_HERE:64298"]
     # With templates now being legacy and ILM in place we need to set the daily index with its template manually.
     index => "logstash-%{+YYYY.MM.dd}"
     template => "/etc/logstash/tpot_es_template.json"
 
     # Configuration to send data to logging server
     ssl => true
-    cacert => '/data/elk/ca.crt'
-    user => 'logstash_internal'
-    password => 'logstash_internal_password_here'
+    cacert => 'LOGGING_CERT_PATH_HERE'
+    user => 'LOGGING_USER_HERE'
+    password => 'LOGGING_PASSWORD_HERE'
   }
 }

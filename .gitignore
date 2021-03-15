@@ -5,6 +5,5 @@ __pycache__
 *.txt
 *.yml
 logstash.conf
-testWait.py
 
 venv

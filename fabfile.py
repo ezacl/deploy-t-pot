@@ -6,7 +6,9 @@ from fabric import Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
-from configFuncs import createElasticsearchYml, createKibanaYml, createTPotUser
+from configFuncs import (createElasticsearchYml, createKibanaYml,
+                         createLogstashConf, createTPotUser,
+                         importKibanaObjects)
 from utils import findPassword, waitForService
 
 
@@ -44,12 +46,12 @@ def installTPot(sensorConn, loggingConn, logger):
                 print("T-Pot installation failed. See log file.")
 
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
-    sensorConn.put("logstash.conf", remote="/data/elk/")
+    sensorConn.put("configFiles/logstash.conf", remote="/data/elk/")
 
-    loggingConn.get("/etc/elasticsearch/certs/ca/ca.crt")
-    sensorConn.put("ca.crt", remote="/data/elk/ca.crt")
-    os.remove("ca.crt")
-    logger.info("Copied certificates from logging server")
+    loggingConn.get("/etc/elasticsearch/certs/fullchain.pem")
+    sensorConn.put("fullchain.pem", remote="/data/elk/")
+    os.remove("fullchain.pem")
+    logger.info("Copied certificate from logging server")
 
     # rebooting server always throws an exception, so ignore
     try:
@@ -119,15 +121,13 @@ def installConfigureElasticsearch(conn, email, logger):
     logger.info("Created elasticsearch certificates")
 
     # avoid hardcoding this
-    ymlConfig = createElasticsearchYml(
+    ymlConfigPath = createElasticsearchYml(
         "/etc/elasticsearch/certs/privkey.pem",
         "/etc/elasticsearch/certs/cert.pem",
         "/etc/elasticsearch/certs/fullchain.pem",
     )
 
-    conn.run(
-        f'echo -e "{ymlConfig}" >> /etc/elasticsearch/elasticsearch.yml', hide="stdout"
-    )
+    conn.put(ymlConfigPath, remote="/etc/elasticsearch/elasticsearch.yml")
     logger.info("Edited /etc/elasticsearch/elasticsearch.yml")
 
     conn.run("systemctl start elasticsearch.service", hide="stdout")
@@ -153,7 +153,7 @@ def configureKibana(conn, logger):
         pty=True,
         watchers=[pwdSetupYes],
     )
-    pwdFile = "elasticsearch_passwords.txt"
+    pwdFile = "passwords.txt"
     logger.info(f"Generated ELK passwords, writing them to {pwdFile}")
 
     pwdRes = autoPasswords.stdout.strip()
@@ -169,14 +169,14 @@ def configureKibana(conn, logger):
     logger.info("Copied elasticsearch certificates to /etc/kibana")
 
     # avoid hardcoding paths again
-    ymlConfig = createKibanaYml(
+    ymlConfigPath = createKibanaYml(
         conn.host,
         kibanaPass,
         "/etc/kibana/certs/privkey.pem",
         "/etc/kibana/certs/fullchain.pem",
     )
 
-    conn.run(f'echo -e "{ymlConfig}" >> /etc/kibana/kibana.yml', hide="stdout")
+    conn.put(ymlConfigPath, remote="/etc/kibana/kibana.yml")
     logger.info("Edited /etc/kibana/kibana.yml")
 
     conn.run("systemctl restart elasticsearch.service", hide="stdout")
@@ -215,8 +215,19 @@ def configureLoggingServer(connection, email, logger):
             f"{connection.host}:64298", "elastic", elasticPass
         )
 
-    with open("t-pot-password.txt", "w") as f:
-        f.write(f"PASSWORD {tPotUser} = {tPotPass}")
+    createLogstashConf(connection.host, "/data/elk/fullchain.pem", tPotUser, tPotPass)
+
+    with open("passwords.txt", "a") as f:
+        f.write(
+            f"\n\nChanged password for user {tPotUser}"
+            f"\nPASSWORD {tPotUser} = {tPotPass}"
+        )
+
+    waitForService(connection.host, 5601)
+
+    importKibanaObjects(
+        f"{connection.host}:5601", "elastic", elasticPass, "kibanaTemplate.ndjson"
+    )
 
 
 if __name__ == "__main__":
@@ -231,13 +242,14 @@ if __name__ == "__main__":
     logHost = os.environ.get("LOGGING_HOST")
     email = os.environ.get("LOGGING_EMAIL")
     logPass = os.environ.get("LOGGING_PASS")
-    # sensorPass = os.environ.get("SENSOR_PASS")
-    # sensorHost = os.environ.get("SENSOR_HOST")
+    sensorPass = os.environ.get("SENSOR_PASS")
+    sensorHost = os.environ.get("SENSOR_HOST")
     logConn = Connection(
         host=logHost, user="root", connect_kwargs={"password": logPass}
     )
-    # sensorConn = Connection(
-    #     host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
-    # )
+    sensorConn = Connection(
+        host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
+    )
 
     configureLoggingServer(logConn, email, logger)
+    installTPot(sensorConn, logConn, logger)
