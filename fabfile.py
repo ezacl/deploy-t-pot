@@ -9,11 +9,12 @@ from invoke.exceptions import UnexpectedExit
 from configFuncs import (createElasticsearchYml, createKibanaYml,
                          createLogstashConf, createTPotUser,
                          importKibanaObjects)
+from errors import BadAPIRequestError
 from utils import findPassword, waitForService
 
 
 def installTPot(sensorConn, loggingConn, logger):
-    """Install T-Pot Sensor type on connection server
+    """Install custom T-Pot Sensor type on connection server
 
     :sensorConn: fabric.Connection object with connection to sensor server (4 GB RAM)
     :logingConn: fabric.Connection object with connection to logging server (8 GB RAM)
@@ -25,6 +26,7 @@ def installTPot(sensorConn, loggingConn, logger):
     sensorConn.run("apt-get --yes install git", pty=True, hide="stdout")
     logger.info("Updated packages and installed git")
 
+    # must clone into /opt/tpot because of altered install.sh script
     sensorConn.run(
         "git clone https://github.com/ezacl/tpotce-light /opt/tpot", hide="stdout"
     )
@@ -48,6 +50,7 @@ def installTPot(sensorConn, loggingConn, logger):
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
     sensorConn.put("configFiles/logstash.conf", remote="/data/elk/")
 
+    # copy SSL certificate over
     loggingConn.get("/etc/elasticsearch/certs/fullchain.pem")
     sensorConn.put("fullchain.pem", remote="/data/elk/")
     os.remove("fullchain.pem")
@@ -63,10 +66,10 @@ def installTPot(sensorConn, loggingConn, logger):
 def installConfigureElasticsearch(conn, email, logger):
     """Install ELK stack and configure Elasticsearch on logging server
 
-    :conn: TODO
-    :email: TODO
-    :logger: TODO
-    :returns: TODO
+    :conn: fabric.Connection object with connection to logging server (8 GB RAM)
+    :email: email address to receive Certbot notifications
+    :logger: logging.logger object
+    :returns: None
 
     """
     conn.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
@@ -127,6 +130,7 @@ def installConfigureElasticsearch(conn, email, logger):
         "/etc/elasticsearch/certs/fullchain.pem",
     )
 
+    # overwrite elasticsearch.yml in config directory
     conn.put(ymlConfigPath, remote="/etc/elasticsearch/elasticsearch.yml")
     logger.info("Edited /etc/elasticsearch/elasticsearch.yml")
 
@@ -135,19 +139,20 @@ def installConfigureElasticsearch(conn, email, logger):
 
 
 def configureKibana(conn, logger):
-    """Configure Kibana on logging server to connect it with Elasticsearch
+    """Configure Kibana on logging server to connect it with Elasticsearch (must be run
+    after installConfigureElasticsearch function)
 
-    ### MUST RUN installConfigureElasticsearch BEFORE (AND PROBABLY WAIT AFTER) ###
-
-    :conn: TODO
-    :logger: TODO
-    :returns: TODO
+    :conn: fabric.Connection object with connection to logging server (8 GB RAM)
+    :logger: logging.logger object
+    :returns: password for elastic user, useful to make subsequent API calls
 
     """
+    # elasticsearch-setup-passwords needs user input even in auto mode, so mock it
     pwdSetupYes = Responder(
         pattern=r"Please confirm that you would like to continue \[y/N\]",
         response="y\n",
     )
+    # create passwords for all ELK-related users
     autoPasswords = conn.run(
         "/usr/share/elasticsearch/bin/elasticsearch-setup-passwords auto",
         pty=True,
@@ -176,6 +181,7 @@ def configureKibana(conn, logger):
         "/etc/kibana/certs/fullchain.pem",
     )
 
+    # overwrite kibana.yml in config directory
     conn.put(ymlConfigPath, remote="/etc/kibana/kibana.yml")
     logger.info("Edited /etc/kibana/kibana.yml")
 
@@ -187,16 +193,18 @@ def configureKibana(conn, logger):
 
 
 def configureLoggingServer(connection, email, logger):
-    """TODO: Docstring for configureLoggingServer.
+    """Completely set up logging server for it to be ready to receive honeypot data
+    from sensor servers
 
-    :connection: TODO
-    :email: TODO
-    :logger: TODO
-    :returns: TODO
+    :connection: fabric.Connection object with connection to logging server (8 GB RAM)
+    :email: email address to receive Certbot notifications
+    :logger: logging.logger object
+    :returns: None
 
     """
     installConfigureElasticsearch(connection, email, logger)
 
+    # block until elasticsearch service (port 64298) is ready
     waitForService(connection.host, 64298)
 
     elasticPass = configureKibana(connection, logger)
@@ -204,27 +212,33 @@ def configureLoggingServer(connection, email, logger):
     waitForService(connection.host, 64298)
 
     try:
+        # making an API call too early causes an error, hence catching it and waiting
         tPotUser, tPotPass = createTPotUser(
             f"{connection.host}:64298", "elastic", elasticPass
         )
-    # make this a more precise error
-    except Exception:
+    except BadAPIRequestError:
         time.sleep(10)
 
         tPotUser, tPotPass = createTPotUser(
             f"{connection.host}:64298", "elastic", elasticPass
         )
 
+    # logstash.conf later gets copied over to each sensor server
     createLogstashConf(connection.host, "/data/elk/fullchain.pem", tPotUser, tPotPass)
 
+    # add password for t_pot_internal user (which sensor servers use to send data)
     with open("passwords.txt", "a") as f:
         f.write(
             f"\n\nChanged password for user {tPotUser}"
             f"\nPASSWORD {tPotUser} = {tPotPass}"
         )
 
+    # block until kibana service (port 5601) is ready
     waitForService(connection.host, 5601)
 
+    # convenience function to copy nice honeypot attack visualizations to kibana
+    # dashboard. Uses an experimental ELK API, so just comment out if it breaks in
+    # the future
     importKibanaObjects(
         f"{connection.host}:5601", "elastic", elasticPass, "kibanaTemplate.ndjson"
     )
