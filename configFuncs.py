@@ -4,6 +4,7 @@ import string
 import requests
 from requests.exceptions import HTTPError
 
+from errors import BadAPIRequestError, NotCreatedError
 from utils import findPassword
 
 
@@ -132,11 +133,11 @@ def createTPotRole(hostPort, creatorUser, creatorPwd):
     except HTTPError:
         # Usually if API request is made before elasticsearch service is ready
         print(roleResp.text)
-        raise Exception("Bad API request. See response above.")
+        raise BadAPIRequestError("Bad API request. See response above.")
 
     # creating the same role twice will not change anything
     if not roleResp.json()["role"]["created"]:
-        raise Exception(f"{roleName} role not created. Does it already exist?")
+        raise NotCreatedError(f"{roleName} role not created. Does it already exist?")
 
     return roleName
 
@@ -193,11 +194,11 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
     except HTTPError:
         # Usually if API request is made before elasticsearch service is ready
         print(userResp.text)
-        raise Exception("Bad API request. See response above.")
+        raise BadAPIRequestError("Bad API request. See response above.")
 
     # creating the same user twice will not change anything
     if not userResp.json()["created"]:
-        raise Exception(f"{userName} user not created. Does it already exist?")
+        raise NotCreatedError(f"{userName} user not created. Does it already exist?")
 
     return userName, createdPwd
 
@@ -230,4 +231,4 @@ def importKibanaObjects(hostPort, userName, password, objectFile):
     except HTTPError:
         # Usually if API request is made before kibana service is ready
         print(importResp.text)
-        raise Exception("Bad API request. See response above.")
+        raise BadAPIRequestError("Bad API request. See response above.")

@@ -2,6 +2,8 @@ import re
 import socket
 import time
 
+from errors import NotFoundError
+
 
 def findPassword(passwordText, username):
     """Find specified password in text returned by elasticsearch-setup-passwords command
@@ -19,7 +21,7 @@ def findPassword(passwordText, username):
         return pwdMatch.group(2)
     except AttributeError:
         # if pattern not found, pwdMatch will be None, raising AttributeError
-        raise Exception(f"{username} password not found in text.")
+        raise NotFoundError(f"{username} password not found in text.")
 
 
 def waitForService(host, port):

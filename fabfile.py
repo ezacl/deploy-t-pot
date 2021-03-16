@@ -9,6 +9,7 @@ from invoke.exceptions import UnexpectedExit
 from configFuncs import (createElasticsearchYml, createKibanaYml,
                          createLogstashConf, createTPotUser,
                          importKibanaObjects)
+from errors import BadAPIRequestError
 from utils import findPassword, waitForService
 
 
@@ -215,8 +216,7 @@ def configureLoggingServer(connection, email, logger):
         tPotUser, tPotPass = createTPotUser(
             f"{connection.host}:64298", "elastic", elasticPass
         )
-    # make this a more precise error
-    except Exception:
+    except BadAPIRequestError:
         time.sleep(10)
 
         tPotUser, tPotPass = createTPotUser(
