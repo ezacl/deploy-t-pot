@@ -26,6 +26,9 @@ def installTPot(sensorConn, loggingConn, logger):
     sensorConn.run("apt-get --yes install git", pty=True, hide="stdout")
     logger.info("Updated packages and installed git")
 
+    # copy vimrc over for convenience
+    sensorConn.put("configFiles/.vimrc")
+
     # must clone into /opt/tpot because of altered install.sh script
     sensorConn.run(
         "git clone https://github.com/ezacl/tpotce-light /opt/tpot", hide="stdout"
@@ -78,11 +81,10 @@ def installConfigureElasticsearch(conn, email, logger):
         pty=True,
         hide="stdout",
     )
-    conn.run(
-        "wget https://raw.githubusercontent.com/ezacl/"
-        "tpotce-light/slim-standard/.vimrc",
-        hide=True,
-    )
+
+    # copy vimrc over for convenience
+    conn.put("configFiles/.vimrc")
+
     logger.info("Updated packages and installed ELK dependencies")
 
     # this gives
