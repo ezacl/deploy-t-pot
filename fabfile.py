@@ -236,11 +236,11 @@ def configureLoggingServer(connection, email, logger):
     # convenience function to copy nice honeypot attack visualizations to kibana
     # dashboard. Uses an experimental ELK API, so just comment out if it breaks in
     # the future
-    importKibanaObjects(
-        f"{connection.host}:5601", "elastic", elasticPass, "kibanaTemplate.ndjson"
-    )
+    importKibanaObjects(f"{connection.host}:5601", "elastic", elasticPass)
 
-    logger.info("Logger: Imported custom objects into Kibana dashboard")
+    logger.info(
+        "Logger: Imported custom objects into Kibana dashboard and turned on dark mode"
+    )
 
 
 def deployNetwork(

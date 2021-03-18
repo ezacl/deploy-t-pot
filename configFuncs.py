@@ -1,5 +1,7 @@
+import os
 import secrets
 import string
+from zipfile import ZipFile
 
 import requests
 from requests.exceptions import HTTPError
@@ -203,32 +205,69 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
     return userName, createdPwd
 
 
-def importKibanaObjects(hostPort, userName, password, objectFile):
+def importKibanaObjects(hostPort, userName, password):
     """Convenience function to programmatically import nice T-Pot attack visualizations
-    in kibana. Note that the /api/saved_objects/_import endpoint is experimental in
-    ELK 7.11, so this may not work with future versions.
+    in kibana as well as set dark mode. Note that the /api/saved_objects/_import
+    endpoint is experimental in ELK 7.11, so this may not work with future versions.
 
     :hostPort: elasticsearch FQDN and port, in form FQDN:port
     :userName: user with which to make API requests (usually elastic)
     :password: password to above user
-    :objectFile: path to .ndjson file with kibana objects export
     :returns: None
 
     """
-    importFile = {"file": open(objectFile)}
-    authTup = (userName, password)
+    # get kibana_export.ndjson from tpotce-light repository
+    zipResp = requests.get(
+        "https://raw.githubusercontent.com/ezacl/tpotce-light/"
+        "master/etc/objects/kibana_export.ndjson.zip"
+    )
+    zipResp.raise_for_status()
 
+    zipName = "kibanaObjects.zip"
+
+    with open(zipName, "wb") as f:
+        f.write(zipResp.content)
+
+    # extract .ndjson file from zip
+    with ZipFile(zipName) as zf:
+        zf.extractall()
+        objectFile = zf.namelist()[0]
+
+    importFile = {"file": open(objectFile)}
+
+    authTup = (userName, password)
+    headers = {"kbn-xsrf": "true"}
+
+    # import all objects in file through API
     importResp = requests.post(
         f"https://{hostPort}/api/saved_objects/_import",
         params={"overwrite": "true"},
-        headers={"kbn-xsrf": "true"},
+        headers=headers,
         auth=authTup,
         files=importFile,
     )
+
+    os.remove(zipName)
+    os.remove(objectFile)
 
     try:
         importResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before kibana service is ready
         print(importResp.text)
+        raise BadAPIRequestError("Bad API request. See response above.")
+
+    # enable kibaana dark mode
+    darkModeResp = requests.post(
+        f"https://{hostPort}/api/kibana/settings/theme:darkMode",
+        headers=headers,
+        auth=authTup,
+        data={"value": "true"},
+    )
+
+    try:
+        darkModeResp.raise_for_status()
+    except HTTPError:
+        # Usually if API request is made before kibana service is ready
+        print(darkModeResp.text)
         raise BadAPIRequestError("Bad API request. See response above.")
