@@ -23,3 +23,12 @@ class NotFoundError(BaseException):
     """
 
     pass
+
+
+class NoCredentialsFileError(BaseException):
+    """Error class to indicate that no credentials file such as credentials.json could
+    be found when running deployNetwork in fabfile.py
+
+    """
+
+    pass
