@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -9,13 +10,14 @@ from invoke.exceptions import UnexpectedExit
 from configFuncs import (createElasticsearchYml, createKibanaYml,
                          createLogstashConf, createTPotUser,
                          importKibanaObjects)
-from errors import BadAPIRequestError
+from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
 
 
-def installTPot(sensorConn, loggingConn, logger):
+def installTPot(number, sensorConn, loggingConn, logger):
     """Install custom T-Pot Sensor type on connection server
 
+    :number: index of sensor in deployNetwork for loop (for logging purposes)
     :sensorConn: fabric.Connection object with connection to sensor server (4 GB RAM)
     :logingConn: fabric.Connection object with connection to logging server (8 GB RAM)
     :logger: logging.logger object
@@ -24,7 +26,7 @@ def installTPot(sensorConn, loggingConn, logger):
     """
     sensorConn.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
     sensorConn.run("apt-get --yes install git", pty=True, hide="stdout")
-    logger.info("Updated packages and installed git")
+    logger.info(f"Sensor {number}: Updated packages and installed git")
 
     # copy vimrc over for convenience
     sensorConn.put("configFiles/.vimrc")
@@ -33,37 +35,26 @@ def installTPot(sensorConn, loggingConn, logger):
     sensorConn.run(
         "git clone https://github.com/ezacl/tpotce-light /opt/tpot", hide="stdout"
     )
-    logger.info("Cloned T-Pot into /opt/tpot/")
+    logger.info(f"Sensor {number}: Cloned T-Pot into /opt/tpot/")
 
     with sensorConn.cd("/opt/tpot/iso/installer/"):
-        # sensorConn.run("git checkout slim-standard", hide="stdout")
-        # logger.info("Checked out slim-standard branch")
-
-        # with sensorConn.cd("iso/installer/"):
         # can add hide="stdout" as always but good to see real time output of
         # T-Pot installation
-        tPotInstall = sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
-        logger.info(tPotInstall.stdout.strip())
-
-        if tPotInstall.ok:
-            print("T-Pot installation successful.")
-        else:
-            print("T-Pot installation failed. See log file.")
+        sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
+        logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
 
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
     sensorConn.put("configFiles/logstash.conf", remote="/data/elk/")
 
-    # copy SSL certificate over
-    loggingConn.get("/etc/elasticsearch/certs/fullchain.pem")
+    # copy SSL certificate over (copied to local machine in deployNetwork)
     sensorConn.put("fullchain.pem", remote="/data/elk/")
-    os.remove("fullchain.pem")
-    logger.info("Copied certificate from logging server")
+    logger.info(f"Sensor {number}: Copied certificate from logging server")
 
     # rebooting server always throws an exception, so ignore
     try:
         sensorConn.run("reboot", hide="stdout")
     except UnexpectedExit:
-        logger.info("Installed T-Pot and rebooted sensor server")
+        logger.info(f"Sensor {number}: Installed T-Pot and rebooted sensor server")
 
 
 def installConfigureElasticsearch(conn, email, logger):
@@ -85,7 +76,7 @@ def installConfigureElasticsearch(conn, email, logger):
     # copy vimrc over for convenience
     conn.put("configFiles/.vimrc")
 
-    logger.info("Updated packages and installed ELK dependencies")
+    logger.info("Logger: Updated packages and installed ELK dependencies")
 
     # this gives
     # "Warning: apt-key output should not be parsed (stdout is not a terminal)"
@@ -105,7 +96,7 @@ def installConfigureElasticsearch(conn, email, logger):
     conn.run("apt-get update", hide="stdout")
     # this one gives the same warning since it also uses apt-key, same fix
     conn.run("apt-get --yes install elasticsearch kibana", pty=True, hide="stdout")
-    logger.info("Installed elasticsearch and kibana")
+    logger.info("Logger: Installed elasticsearch and kibana")
 
     conn.run("mkdir /etc/elasticsearch/certs", hide="stdout")
 
@@ -123,7 +114,7 @@ def installConfigureElasticsearch(conn, email, logger):
         hide="stdout",
     )
     conn.run("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide="stdout")
-    logger.info("Created elasticsearch certificates")
+    logger.info("Logger: Created elasticsearch certificates")
 
     # avoid hardcoding this
     ymlConfigPath = createElasticsearchYml(
@@ -134,10 +125,10 @@ def installConfigureElasticsearch(conn, email, logger):
 
     # overwrite elasticsearch.yml in config directory
     conn.put(ymlConfigPath, remote="/etc/elasticsearch/elasticsearch.yml")
-    logger.info("Edited /etc/elasticsearch/elasticsearch.yml")
+    logger.info("Logger: Edited /etc/elasticsearch/elasticsearch.yml")
 
     conn.run("systemctl start elasticsearch.service", hide="stdout")
-    logger.info("Started elasticsearch service with systemd")
+    logger.info("Logger: Started elasticsearch service with systemd")
 
 
 def configureKibana(conn, logger):
@@ -161,7 +152,7 @@ def configureKibana(conn, logger):
         watchers=[pwdSetupYes],
     )
     pwdFile = "passwords.txt"
-    logger.info(f"Generated ELK passwords, writing them to {pwdFile}")
+    logger.info(f"Logger: Generated ELK passwords, writing them to {pwdFile}")
 
     pwdRes = autoPasswords.stdout.strip()
 
@@ -173,7 +164,7 @@ def configureKibana(conn, logger):
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
     conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
-    logger.info("Copied elasticsearch certificates to /etc/kibana")
+    logger.info("Logger: Copied elasticsearch certificates to /etc/kibana")
 
     # avoid hardcoding paths again
     ymlConfigPath = createKibanaYml(
@@ -185,11 +176,11 @@ def configureKibana(conn, logger):
 
     # overwrite kibana.yml in config directory
     conn.put(ymlConfigPath, remote="/etc/kibana/kibana.yml")
-    logger.info("Edited /etc/kibana/kibana.yml")
+    logger.info("Logger: Edited /etc/kibana/kibana.yml")
 
     conn.run("systemctl restart elasticsearch.service", hide="stdout")
     conn.run("systemctl start kibana.service", hide="stdout")
-    logger.info("Started elasticsearch and kibana services with systemd")
+    logger.info("Logger: Started elasticsearch and kibana services with systemd")
 
     return elasticPass
 
@@ -225,6 +216,10 @@ def configureLoggingServer(connection, email, logger):
             f"{connection.host}:64298", "elastic", elasticPass
         )
 
+    logger.info(
+        f"Logger: Created {tPotUser} Elasticsearch user with corresponding role"
+    )
+
     # logstash.conf later gets copied over to each sensor server
     createLogstashConf(connection.host, "/data/elk/fullchain.pem", tPotUser, tPotPass)
 
@@ -245,9 +240,33 @@ def configureLoggingServer(connection, email, logger):
         f"{connection.host}:5601", "elastic", elasticPass, "kibanaTemplate.ndjson"
     )
 
+    logger.info("Logger: Imported custom objects into Kibana dashboard")
 
-if __name__ == "__main__":
-    logFile = "fabric_logs.log"
+
+def deployNetwork(
+    loggingServer=True, credsFile="credentials.json", logFile="fabric_logs.log"
+):
+    """Set up entire distributed T-Pot network with logging and sensor servers
+
+    :loggingServer: optional, whether to set up central logging server. Defaults to
+    True. Set to False if you already have deployed a logging server and want to
+    only add sensor server(s)
+    :credsFile: optional, path to credentials JSON file. Defaults to credentials.json
+    :logFile: optional, path to log file. Defaults to fabric_logs.log
+    :returns: None
+
+    """
+    try:
+        # get server credentials from credentials file
+        with open(credsFile) as f:
+            credentials = json.load(f)
+            logCreds = credentials["logging"]
+            sensorCreds = credentials["sensors"]
+    except FileNotFoundError:
+        raise NoCredentialsFileError(
+            f"{credsFile} not found. Did you copy credentials.json.template?"
+        )
+
     logging.basicConfig(
         filename=logFile,
         level=logging.INFO,
@@ -255,17 +274,33 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger(__name__)
 
-    logHost = os.environ.get("LOGGING_HOST")
-    email = os.environ.get("LOGGING_EMAIL")
-    logPass = os.environ.get("LOGGING_PASS")
-    sensorPass = os.environ.get("SENSOR_PASS")
-    sensorHost = os.environ.get("SENSOR_HOST")
     logConn = Connection(
-        host=logHost, user="root", connect_kwargs={"password": logPass}
+        host=logCreds["host"],
+        user="root",
+        connect_kwargs={"password": logCreds["password"]},
     )
-    sensorConn = Connection(
-        host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
-    )
+    if loggingServer:
+        # set up central logging server
+        configureLoggingServer(logConn, logCreds["email"], logger)
 
-    # configureLoggingServer(logConn, email, logger)
-    # installTPot(sensorConn, logConn, logger)
+    # retrieve SSL certificate from logging server
+    logConn.get("/etc/elasticsearch/certs/fullchain.pem")
+
+    # set up all sensor servers (make this async soon?)
+    for index, sensor in enumerate(sensorCreds):
+        sensorConn = Connection(
+            host=sensor["host"],
+            user="root",
+            connect_kwargs={"password": sensor["password"]},
+        )
+        installTPot(index + 1, sensorConn, logConn, logger)
+
+        sensorConn.close()
+
+    logConn.close()
+
+    os.remove("fullchain.pem")
+
+
+if __name__ == "__main__":
+    deployNetwork()
