@@ -233,7 +233,8 @@ def importKibanaObjects(hostPort, userName, password):
         zf.extractall()
         objectFile = zf.namelist()[0]
 
-    importFile = {"file": open(objectFile)}
+    objFileHandle = open(objectFile)
+    importFile = {"file": objFileHandle}
 
     authTup = (userName, password)
     headers = {"kbn-xsrf": "true"}
@@ -247,6 +248,7 @@ def importKibanaObjects(hostPort, userName, password):
         files=importFile,
     )
 
+    objFileHandle.close()
     os.remove(zipName)
     os.remove(objectFile)
 

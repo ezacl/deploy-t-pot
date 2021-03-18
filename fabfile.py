@@ -31,23 +31,27 @@ def installTPot(number, sensorConn, loggingConn, logger):
     # copy vimrc over for convenience
     sensorConn.put("configFiles/.vimrc")
 
-    # must clone into /opt/tpot because of altered install.sh script
-    sensorConn.run(
-        "git clone https://github.com/ezacl/tpotce-light /opt/tpot", hide="stdout"
-    )
-    logger.info(f"Sensor {number}: Cloned T-Pot into /opt/tpot/")
+    tPotPath = "/opt/tpot"
 
-    with sensorConn.cd("/opt/tpot/iso/installer/"):
+    # must clone into /opt/tpot/ because of altered install.sh script
+    sensorConn.run(
+        f"git clone https://github.com/ezacl/tpotce-light {tPotPath}", hide="stdout"
+    )
+    logger.info(f"Sensor {number}: Cloned T-Pot into {tPotPath}")
+
+    with sensorConn.cd(f"{tPotPath}/iso/installer/"):
         # can add hide="stdout" as always but good to see real time output of
         # T-Pot installation
         sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
         logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
 
+    dataPath = "/data/elk/"
+
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
-    sensorConn.put("configFiles/logstash.conf", remote="/data/elk/")
+    sensorConn.put("configFiles/logstash.conf", remote=dataPath)
 
     # copy SSL certificate over (copied to local machine in deployNetwork)
-    sensorConn.put("fullchain.pem", remote="/data/elk/")
+    sensorConn.put("fullchain.pem", remote=dataPath)
     logger.info(f"Sensor {number}: Copied certificate from logging server")
 
     # rebooting server always throws an exception, so ignore
@@ -66,9 +70,11 @@ def installConfigureElasticsearch(conn, email, logger):
     :returns: None
 
     """
+    elkDeps = "gnupg apt-transport-https certbot"
+
     conn.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
     conn.run(
-        "apt-get --yes install gnupg apt-transport-https certbot",
+        f"apt-get --yes install {elkDeps}",
         pty=True,
         hide="stdout",
     )
@@ -98,7 +104,10 @@ def installConfigureElasticsearch(conn, email, logger):
     conn.run("apt-get --yes install elasticsearch kibana", pty=True, hide="stdout")
     logger.info("Logger: Installed elasticsearch and kibana")
 
-    conn.run("mkdir /etc/elasticsearch/certs", hide="stdout")
+    elasticPath = "/etc/elasticsearch"
+    elasticCertsPath = f"{elasticPath}/certs"
+
+    conn.run(f"mkdir {elasticCertsPath}", hide="stdout")
 
     # will have to look into auto-renewing certificates
     # https://www.digitalocean.com/community/tutorials/how-to-use-certbot-standalone-mode-to-retrieve-let-s-encrypt-ssl-certificates-on-debian-10
@@ -110,22 +119,21 @@ def installConfigureElasticsearch(conn, email, logger):
 
     # tried to symlink these instead, but kept on getting permission errors in ES logs
     conn.run(
-        f"cp /etc/letsencrypt/live/{conn.host}/* /etc/elasticsearch/certs/",
+        f"cp /etc/letsencrypt/live/{conn.host}/* {elasticCertsPath}/",
         hide="stdout",
     )
-    conn.run("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide="stdout")
+    conn.run(f"chmod 644 {elasticCertsPath}/privkey.pem", hide="stdout")
     logger.info("Logger: Created elasticsearch certificates")
 
-    # avoid hardcoding this
     ymlConfigPath = createElasticsearchYml(
-        "/etc/elasticsearch/certs/privkey.pem",
-        "/etc/elasticsearch/certs/cert.pem",
-        "/etc/elasticsearch/certs/fullchain.pem",
+        f"{elasticCertsPath}/privkey.pem",
+        f"{elasticCertsPath}/cert.pem",
+        f"{elasticCertsPath}/fullchain.pem",
     )
 
     # overwrite elasticsearch.yml in config directory
-    conn.put(ymlConfigPath, remote="/etc/elasticsearch/elasticsearch.yml")
-    logger.info("Logger: Edited /etc/elasticsearch/elasticsearch.yml")
+    conn.put(ymlConfigPath, remote=f"{elasticPath}/elasticsearch.yml")
+    logger.info(f"Logger: Edited {elasticPath}/elasticsearch.yml")
 
     conn.run("systemctl start elasticsearch.service", hide="stdout")
     logger.info("Logger: Started elasticsearch service with systemd")
@@ -162,21 +170,23 @@ def configureKibana(conn, logger):
     kibanaPass = findPassword(pwdRes, "kibana_system")
     elasticPass = findPassword(pwdRes, "elastic")
 
-    # copying certificates isn't good but I couldn't get it to work with symlinks
-    conn.run("cp -r /etc/elasticsearch/certs /etc/kibana/", hide="stdout")
-    logger.info("Logger: Copied elasticsearch certificates to /etc/kibana")
+    kibanaPath = "/etc/kibana"
+    kibanaCertsPath = f"{kibanaPath}/certs"
 
-    # avoid hardcoding paths again
+    # copying certificates isn't good but I couldn't get it to work with symlinks
+    conn.run(f"cp -r /etc/elasticsearch/certs {kibanaPath}/", hide="stdout")
+    logger.info(f"Logger: Copied elasticsearch certificates to {kibanaCertsPath}")
+
     ymlConfigPath = createKibanaYml(
         conn.host,
         kibanaPass,
-        "/etc/kibana/certs/privkey.pem",
-        "/etc/kibana/certs/fullchain.pem",
+        f"{kibanaCertsPath}/privkey.pem",
+        f"{kibanaCertsPath}/fullchain.pem",
     )
 
     # overwrite kibana.yml in config directory
-    conn.put(ymlConfigPath, remote="/etc/kibana/kibana.yml")
-    logger.info("Logger: Edited /etc/kibana/kibana.yml")
+    conn.put(ymlConfigPath, remote=f"{kibanaPath}/kibana.yml")
+    logger.info(f"Logger: Edited {kibanaPath}/kibana.yml")
 
     conn.run("systemctl restart elasticsearch.service", hide="stdout")
     conn.run("systemctl start kibana.service", hide="stdout")
