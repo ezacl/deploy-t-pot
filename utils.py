@@ -1,6 +1,8 @@
 import re
-import socket
 import time
+
+import requests
+from requests.exceptions import ConnectionError
 
 from errors import NotFoundError
 
@@ -27,21 +29,20 @@ def findPassword(passwordText, username):
 def waitForService(host, port):
     """Simple function to block until the specified port on host opens up
 
-    :host: host of port to check
+    :host: host of port to check as an FQDN (usually fabric.Connection.host)
     :port: port number to check availability of
     :returns: None
 
     """
-    while True:
-        # there must be a way to do this without creating a new socket every time
-        monitorSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    status = 600
 
-        if monitorSock.connect_ex((host, port)) == 0:
-            monitorSock.close()
-            break
+    # wait until server responds with < 500 status code to consider it "ready"
+    while status >= 500:
+        try:
+            resp = requests.get(f"https://{host}:{port}")
 
-        monitorSock.close()
+            status = resp.status_code
+        except ConnectionError:
+            pass
+
         time.sleep(3)
-
-    # give some extra time after successful connection for service to start up
-    time.sleep(10)

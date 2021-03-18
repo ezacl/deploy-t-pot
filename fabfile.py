@@ -35,20 +35,20 @@ def installTPot(sensorConn, loggingConn, logger):
     )
     logger.info("Cloned T-Pot into /opt/tpot/")
 
-    with sensorConn.cd("/opt/tpot/"):
-        sensorConn.run("git checkout slim-standard", hide="stdout")
-        logger.info("Checked out slim-standard branch")
+    with sensorConn.cd("/opt/tpot/iso/installer/"):
+        # sensorConn.run("git checkout slim-standard", hide="stdout")
+        # logger.info("Checked out slim-standard branch")
 
-        with sensorConn.cd("iso/installer/"):
-            # can add hide="stdout" as always but good to see real time output of
-            # T-Pot installation
-            tPotInstall = sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
-            logger.info(tPotInstall.stdout.strip())
+        # with sensorConn.cd("iso/installer/"):
+        # can add hide="stdout" as always but good to see real time output of
+        # T-Pot installation
+        tPotInstall = sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
+        logger.info(tPotInstall.stdout.strip())
 
-            if tPotInstall.ok:
-                print("T-Pot installation successful.")
-            else:
-                print("T-Pot installation failed. See log file.")
+        if tPotInstall.ok:
+            print("T-Pot installation successful.")
+        else:
+            print("T-Pot installation failed. See log file.")
 
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
     sensorConn.put("configFiles/logstash.conf", remote="/data/elk/")
@@ -267,5 +267,5 @@ if __name__ == "__main__":
         host=sensorHost, user="root", connect_kwargs={"password": sensorPass}
     )
 
-    configureLoggingServer(logConn, email, logger)
-    installTPot(sensorConn, logConn, logger)
+    # configureLoggingServer(logConn, email, logger)
+    # installTPot(sensorConn, logConn, logger)
