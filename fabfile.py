@@ -310,10 +310,10 @@ def deployNetwork(
         user="root",
         connect_kwargs={"password": logCreds["password"]},
     )
-    # if loggingServer:
-    #     # set up central logging server
-    #     sensorHosts = [sensor["host"] for sensor in sensorCreds]
-    #     configureLoggingServer(logConn, sensorHosts, logCreds["email"], logger)
+    if loggingServer:
+        # set up central logging server
+        sensorHosts = [sensor["host"] for sensor in sensorCreds]
+        configureLoggingServer(logConn, sensorHosts, logCreds["email"], logger)
 
     # retrieve SSL certificate and SSH public key from logging server
     logConn.get("/etc/elasticsearch/certs/fullchain.pem")

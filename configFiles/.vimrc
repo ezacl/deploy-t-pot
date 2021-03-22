@@ -24,6 +24,7 @@ set incsearch
 set hlsearch
 set noswapfile
 set nobackup
+set statusline+=%F
 
 " wrap lines for log files
 autocmd BufNewFile,BufRead *.log setlocal wrap lbr
