@@ -85,6 +85,33 @@ def createLogstashConf(domainName, certPath, user, password):
         f.write(logConf)
 
 
+def createUpdateCertsSh(loggingDomain, sensorDomains, elasticCertsPath, kibanaPath):
+    """Create updateCerts.sh file for logging server from
+    configFiles/updateCerts.sh.template
+
+    :loggingDomain: FQDN of logging server
+    :sensorDomains: list of FQDNs or IP addresses of sensor servers
+    :elasticCertsPath: path to elasticsearch SSL certificate directory
+    :kibanaPath: path to kibana configuration directory
+    :returns: None
+
+    """
+    with open("configFiles/updateCerts.sh.template") as f:
+        updatesh = f.read()
+
+    updatesh = updatesh.replace("SENSOR_FQDNS_OR_IPS", " ".join(sensorDomains))
+    updatesh = updatesh.replace("LOGGING_FQDN_HERE", loggingDomain)
+    updatesh = updatesh.replace("ELASTIC_CERTS_PATH", elasticCertsPath)
+    updatesh = updatesh.replace("KIBANA_PATH", kibanaPath)
+
+    destFile = "configFiles/updateCerts.sh"
+
+    with open(destFile, "w") as f:
+        f.write(updatesh)
+
+    return destFile
+
+
 def createTPotRole(hostPort, creatorUser, creatorPwd):
     """Create t_pot_writer elasticsearch role for sensor servers with correct
     permissions to send honeypot data to logging server

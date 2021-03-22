@@ -6,5 +6,6 @@ __pycache__
 passwords.txt
 logstash.conf
 credentials.json
+updateCerts.sh
 
 venv
