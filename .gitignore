@@ -3,6 +3,7 @@ __pycache__
 
 *.log
 *.yml
+!curatorActions.yml
 passwords.txt
 logstash.conf
 credentials.json

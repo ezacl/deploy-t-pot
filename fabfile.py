@@ -7,8 +7,8 @@ from fabric import Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
-from configFuncs import (createElasticsearchYml, createKibanaYml,
-                         createLogstashConf, createTPotUser,
+from configFuncs import (createCuratorConfigYml, createElasticsearchYml,
+                         createKibanaYml, createLogstashConf, createTPotUser,
                          createUpdateCertsSh, importKibanaObjects)
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
@@ -98,15 +98,30 @@ def installConfigureElasticsearch(conn, email, elasticPath, elasticCertsPath, lo
         pty=True,
         hide="stdout",
     )
+    conn.run(
+        "wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch"
+        " | apt-key add -",
+        pty=True,
+        hide="stdout",
+    )
     # this needs sudo tee if not already run as root
     conn.run(
         'echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main"'
         " | tee /etc/apt/sources.list.d/elastic-7.x.list",
         hide="stdout",
     )
+    conn.run(
+        'echo "deb [arch=amd64] https://packages.elastic.co/curator/5/debian9 stable'
+        ' main" >> /etc/apt/sources.list.d/elastic-7.x.list',
+        hide="stdout",
+    )
     conn.run("apt-get update", hide="stdout")
     # this one gives the same warning since it also uses apt-key, same fix
-    conn.run("apt-get --yes install elasticsearch kibana", pty=True, hide="stdout")
+    conn.run(
+        "apt-get --yes install elasticsearch kibana elasticsearch-curator",
+        pty=True,
+        hide="stdout",
+    )
     logger.info("Logger: Installed elasticsearch and kibana")
 
     conn.run(f"mkdir {elasticCertsPath}", hide="stdout")
@@ -173,6 +188,23 @@ def configureKibana(conn, kibanaPath, logger):
 
     kibanaPass = findPassword(pwdRes, "kibana_system")
     elasticPass = findPassword(pwdRes, "elastic")
+
+    # commands to set up elasticsearch-curator to delete old indices
+    curatorPath = "/opt/elasticsearch-curator/"
+    conn.run("mkdir /var/log/curator", hide="stdout")
+
+    curatorConfigPath = createCuratorConfigYml(conn.host, elasticPass)
+    conn.put(curatorConfigPath, remote=curatorPath)
+    conn.put("configFiles/curatorActions.yml", remote=curatorPath)
+
+    # add cronjob to run curator every day at midnight
+    curatorCommand = (
+        f"curator --config {curatorPath}curatorConfig.yml"
+        f" {curatorPath}curatorActions.yml"
+    )
+    conn.run(f'echo "{curatorCommand}" >> /etc/crontab')
+
+    logger.info("Logger: Set up elasticsearch-curator to delete old indices")
 
     kibanaCertsPath = f"{kibanaPath}/certs"
 
