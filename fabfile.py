@@ -7,9 +7,9 @@ from fabric import Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
-from configFuncs import (createElasticsearchYml, createKibanaYml,
-                         createLogstashConf, createTPotUser,
-                         importKibanaObjects)
+from configFuncs import (createCuratorConfigYml, createElasticsearchYml,
+                         createKibanaYml, createLogstashConf, createTPotUser,
+                         createUpdateCertsSh, importKibanaObjects)
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
 
@@ -30,6 +30,9 @@ def installTPot(number, sensorConn, loggingConn, logger):
 
     # copy vimrc over for convenience
     sensorConn.put("configFiles/.vimrc")
+
+    # copy SSH public key to sensor server to transfer files from logging server
+    sensorConn.put("id_rsa.pub", remote=".ssh/authorized_keys")
 
     tPotPath = "/opt/tpot"
 
@@ -61,11 +64,13 @@ def installTPot(number, sensorConn, loggingConn, logger):
         logger.info(f"Sensor {number}: Installed T-Pot and rebooted sensor server")
 
 
-def installConfigureElasticsearch(conn, email, logger):
+def installConfigureElasticsearch(conn, email, elasticPath, elasticCertsPath, logger):
     """Install ELK stack and configure Elasticsearch on logging server
 
     :conn: fabric.Connection object with connection to logging server (8 GB RAM)
     :email: email address to receive Certbot notifications
+    :elasticPath: path to elasticsearch configuration directory
+    :elasticPath: path to elasticsearch SSL certificate directory
     :logger: logging.logger object
     :returns: None
 
@@ -93,19 +98,31 @@ def installConfigureElasticsearch(conn, email, logger):
         pty=True,
         hide="stdout",
     )
+    conn.run(
+        "wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch"
+        " | apt-key add -",
+        pty=True,
+        hide="stdout",
+    )
     # this needs sudo tee if not already run as root
     conn.run(
         'echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main"'
         " | tee /etc/apt/sources.list.d/elastic-7.x.list",
         hide="stdout",
     )
+    conn.run(
+        'echo "deb [arch=amd64] https://packages.elastic.co/curator/5/debian9 stable'
+        ' main" >> /etc/apt/sources.list.d/elastic-7.x.list',
+        hide="stdout",
+    )
     conn.run("apt-get update", hide="stdout")
     # this one gives the same warning since it also uses apt-key, same fix
-    conn.run("apt-get --yes install elasticsearch kibana", pty=True, hide="stdout")
+    conn.run(
+        "apt-get --yes install elasticsearch kibana elasticsearch-curator",
+        pty=True,
+        hide="stdout",
+    )
     logger.info("Logger: Installed elasticsearch and kibana")
-
-    elasticPath = "/etc/elasticsearch"
-    elasticCertsPath = f"{elasticPath}/certs"
 
     conn.run(f"mkdir {elasticCertsPath}", hide="stdout")
 
@@ -123,6 +140,7 @@ def installConfigureElasticsearch(conn, email, logger):
         hide="stdout",
     )
     conn.run(f"chmod 644 {elasticCertsPath}/privkey.pem", hide="stdout")
+
     logger.info("Logger: Created elasticsearch certificates")
 
     ymlConfigPath = createElasticsearchYml(
@@ -139,11 +157,12 @@ def installConfigureElasticsearch(conn, email, logger):
     logger.info("Logger: Started elasticsearch service with systemd")
 
 
-def configureKibana(conn, logger):
+def configureKibana(conn, kibanaPath, logger):
     """Configure Kibana on logging server to connect it with Elasticsearch (must be run
     after installConfigureElasticsearch function)
 
     :conn: fabric.Connection object with connection to logging server (8 GB RAM)
+    :kibanaPath: path to kibana configuration directory
     :logger: logging.logger object
     :returns: password for elastic user, useful to make subsequent API calls
 
@@ -170,7 +189,23 @@ def configureKibana(conn, logger):
     kibanaPass = findPassword(pwdRes, "kibana_system")
     elasticPass = findPassword(pwdRes, "elastic")
 
-    kibanaPath = "/etc/kibana"
+    # commands to set up elasticsearch-curator to delete old indices
+    curatorPath = "/opt/elasticsearch-curator/"
+    conn.run("mkdir /var/log/curator", hide="stdout")
+
+    curatorConfigPath = createCuratorConfigYml(conn.host, elasticPass)
+    conn.put(curatorConfigPath, remote=curatorPath)
+    conn.put("configFiles/curatorActions.yml", remote=curatorPath)
+
+    # add cronjob to run curator every day at midnight
+    curatorCommand = (
+        f"curator --config {curatorPath}curatorConfig.yml"
+        f" {curatorPath}curatorActions.yml"
+    )
+    conn.run(f'echo "{curatorCommand}" >> /etc/crontab')
+
+    logger.info("Logger: Set up elasticsearch-curator to delete old indices")
+
     kibanaCertsPath = f"{kibanaPath}/certs"
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
@@ -195,22 +230,40 @@ def configureKibana(conn, logger):
     return elasticPass
 
 
-def configureLoggingServer(connection, email, logger):
+def configureLoggingServer(connection, sensorDomains, email, logger):
     """Completely set up logging server for it to be ready to receive honeypot data
     from sensor servers
 
     :connection: fabric.Connection object with connection to logging server (8 GB RAM)
+    :sensorDomains: list of FQDNs or IP addresses of sensor servers
     :email: email address to receive Certbot notifications
     :logger: logging.logger object
     :returns: None
 
     """
-    installConfigureElasticsearch(connection, email, logger)
+    # generate SSH key
+    connection.run("ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''", hide="stdout")
+
+    elasticPath = "/etc/elasticsearch"
+    elasticCertsPath = f"{elasticPath}/certs"
+    kibanaPath = "/etc/kibana"
+
+    installConfigureElasticsearch(
+        connection, email, elasticPath, elasticCertsPath, logger
+    )
+
+    # create custom SSL renewal shell script and copy it to logging server
+    updateShPath = createUpdateCertsSh(
+        connection.host, sensorDomains, elasticCertsPath, kibanaPath
+    )
+    renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
+    connection.put(updateShPath, remote=renewHookPath)
+    connection.run(f"chmod +x {renewHookPath}", hide="stdout")
 
     # block until elasticsearch service (port 64298) is ready
     waitForService(connection.host, 64298)
 
-    elasticPass = configureKibana(connection, logger)
+    elasticPass = configureKibana(connection, kibanaPath, logger)
 
     waitForService(connection.host, 64298)
 
@@ -291,10 +344,12 @@ def deployNetwork(
     )
     if loggingServer:
         # set up central logging server
-        configureLoggingServer(logConn, logCreds["email"], logger)
+        sensorHosts = [sensor["host"] for sensor in sensorCreds]
+        configureLoggingServer(logConn, sensorHosts, logCreds["email"], logger)
 
-    # retrieve SSL certificate from logging server
+    # retrieve SSL certificate and SSH public key from logging server
     logConn.get("/etc/elasticsearch/certs/fullchain.pem")
+    logConn.get(".ssh/id_rsa.pub")
 
     # set up all sensor servers (make this async soon?)
     for index, sensor in enumerate(sensorCreds):
@@ -310,6 +365,7 @@ def deployNetwork(
     logConn.close()
 
     os.remove("fullchain.pem")
+    os.remove("id_rsa.pub")
 
 
 if __name__ == "__main__":

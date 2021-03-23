@@ -1,0 +1,20 @@
+client:
+  hosts:
+    - LOGGING_FQDN_HERE
+  port: 64298
+  url_prefix:
+  use_ssl: True
+  certificate:
+  client_cert:
+  client_key:
+  ssl_no_validate: False
+  username: elastic
+  password: ELASTIC_PASSWORD
+  timeout: 30
+  master_only: False
+
+logging:
+  loglevel: INFO
+  logfile:  /var/log/curator/curator.log
+  logformat: default
+  blacklist: ['elasticsearch', 'urllib3']
