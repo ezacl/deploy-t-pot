@@ -29,7 +29,7 @@
     - So if you would SSH into the logging server with `ssh root@subdomain.mydomain.com`, then `export LOGGING_HOST="subdomain.mydomain.com"`
   - `*_PASS` should be the root password to SSH into the server
   - `LOGGING_EMAIL` should be the email address to give to Certbot for notifications about SSL certificates expiring, etc.
-- Run `python3 fabfile.py` to configure the logging server and one sensor server by default. The entire process will take ~20 minutes, and logs will be written to `fabric_logs.log`
+- Run `python3 fabfile.py` to configure the logging server and one sensor server by default. The entire process will take ~20 minutes, and logs will be written to `deployment.log`
 - Once the script finishes, you can access the logging server's Kibana dashboard at https://your.chosen.domain.com:5601
   - Log in with user `elastic` and the password for the user written in `passwords.txt`
 - Go to Analytics > Dashboard > T-Pot to see attack data visualizations
