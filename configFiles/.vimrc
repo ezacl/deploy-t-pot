@@ -24,7 +24,7 @@ set incsearch
 set hlsearch
 set noswapfile
 set nobackup
-set statusline+=%F
+set statusline=%F\ %m\ %=%p%%\ \|\ %l:%c\ 
 
 " wrap lines for log files
 autocmd BufNewFile,BufRead *.log setlocal wrap lbr
@@ -66,7 +66,7 @@ inoremap " ""<Left>
 
 colorscheme desert
 
-highlight StatusLine ctermbg=yellow ctermfg=darkgray
+highlight StatusLine ctermbg=255 ctermfg=240
 
 highlight Normal ctermfg=white ctermbg=black
 highlight Search ctermbg=darkblue ctermfg=white
