@@ -41,7 +41,10 @@ def installTPot(number, sensorConn):
     sensorConn.put("configFiles/.vimrc")
 
     # copy SSH public key to sensor server to transfer files from logging server
-    sensorConn.put("id_rsa.pub", remote=".ssh/authorized_keys")
+    tempPubKey = ".ssh/logging_pubkey"
+    sensorConn.put("id_rsa.pub", remote=tempPubKey)
+    sensorConn.run(f"cat {tempPubKey} >> .ssh/authorized_keys")
+    sensorConn.run(f"rm {tempPubKey}")
 
     tPotPath = "/opt/tpot"
 
@@ -318,7 +321,7 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
             host=sensor["host"],
             user="root",
         )
-        installTPot(index + 1, sensorConn, logConn)
+        installTPot(index + 1, sensorConn)
 
         sensorConn.close()
 

@@ -6,8 +6,9 @@ from zipfile import ZipFile
 import requests
 from requests.exceptions import HTTPError
 
+from configFuncs import createCuratorConfigYml
 from errors import BadAPIRequestError, NotCreatedError
-from utils import createCuratorConfigYml, findPassword
+from utils import findPassword
 
 
 def installPackages(connection, packageList):
