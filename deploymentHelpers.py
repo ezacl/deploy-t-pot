@@ -2,11 +2,11 @@ from utils import createCuratorConfigYml
 
 
 def installPackages(connection, packageList):
-    """TODO: Docstring for installPackages.
+    """Install packages on server using apt-get
 
-    :connection: TODO
-    :packages: TODO
-    :returns: TODO
+    :connection: fabric.Connection object to server
+    :packages: list of package names to install
+    :returns: None
 
     """
     packageStr = " ".join(packageList)
@@ -19,13 +19,13 @@ def installPackages(connection, packageList):
 
 
 def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
-    """TODO: Docstring for generateSSLCerts.
+    """Generate SSL certificates on logging server using Certbot
 
-    :connection: TODO
-    :email: TODO
-    :elasticCertsPath: TODO
-    :kibanaCertsPath: TODO
-    :returns: TODO
+    :connection: fabric.Connection object to logging server
+    :email: email address to receive Certbot notifications
+    :elasticCertsPath: path to elasticsearch SSL certificate directory
+    :kibanaCertsPath: path to kibana SSL certificate directory
+    :returns: None
 
     """
     connection.run(f"mkdir {elasticCertsPath}", hide="stdout")
@@ -49,12 +49,12 @@ def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
 
 
 def setupCurator(connection, configPath, elasticPass):
-    """TODO: Docstring for setupCurator.
+    """Set up elasticsearch-curator service to delete old elasticsearch indices
 
-    :connection: TODO
-    :configPath: TODO
-    :elasticPass: TODO
-    :returns: TODO
+    :connection: fabric.Connection object to logging server
+    :configPath: path to curator configuration directory
+    :elasticPass: password for user elastic
+    :returns: None
 
     """
     # commands to set up elasticsearch-curator to delete old indices
