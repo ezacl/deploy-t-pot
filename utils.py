@@ -40,7 +40,6 @@ def waitForService(host, port):
     while status >= 500:
         try:
             resp = requests.get(f"https://{host}:{port}")
-
             status = resp.status_code
         except ConnectionError:
             pass
