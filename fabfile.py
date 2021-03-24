@@ -15,13 +15,21 @@ from deploymentHelpers import (createTPotUser, generateSSLCerts,
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
 
+logFile = "deployment.log"
 
-def installTPot(number, sensorConn, logger):
+logging.basicConfig(
+    filename=logFile,
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+def installTPot(number, sensorConn):
     """Install custom T-Pot Sensor type on connection server
 
     :number: index of sensor in deployNetwork for loop (for logging purposes)
     :sensorConn: fabric.Connection object with connection to sensor server (4 GB RAM)
-    :logger: logging.logger object
     :returns: None
 
     """
@@ -66,7 +74,7 @@ def installTPot(number, sensorConn, logger):
 
 
 def installConfigureElasticsearch(
-    conn, email, elasticPath, elasticCertsPath, kibanaCertsPath, logger
+    conn, email, elasticPath, elasticCertsPath, kibanaCertsPath
 ):
     """Install ELK stack and configure Elasticsearch on logging server
 
@@ -75,7 +83,6 @@ def installConfigureElasticsearch(
     :elasticPath: path to elasticsearch configuration directory
     :elasticCertsPath: path to elasticsearch SSL certificate directory
     :kibanaCertsPath: path to kibana SSL certificate directory
-    :logger: logging.logger object
     :returns: None
 
     """
@@ -139,14 +146,13 @@ def installConfigureElasticsearch(
     logger.info("Logger: Started elasticsearch service with systemd")
 
 
-def configureKibana(conn, kibanaPath, kibanaCertsPath, logger):
+def configureKibana(conn, kibanaPath, kibanaCertsPath):
     """Configure Kibana on logging server to connect it with Elasticsearch (must be run
     after installConfigureElasticsearch function)
 
     :conn: fabric.Connection object with connection to logging server (8 GB RAM)
     :kibanaPath: path to kibana configuration directory
     :kibanaCertsPath: path to kibana SSL certificate directory
-    :logger: logging.logger object
     :returns: password for elastic user, useful to make subsequent API calls
 
     """
@@ -195,14 +201,13 @@ def configureKibana(conn, kibanaPath, kibanaCertsPath, logger):
     return elasticPass
 
 
-def configureLoggingServer(connection, sensorDomains, email, logger):
+def configureLoggingServer(connection, sensorDomains, email):
     """Completely set up logging server for it to be ready to receive honeypot data
     from sensor servers
 
     :connection: fabric.Connection object with connection to logging server (8 GB RAM)
     :sensorDomains: list of FQDNs or IP addresses of sensor servers
     :email: email address to receive Certbot notifications
-    :logger: logging.logger object
     :returns: None
 
     """
@@ -215,7 +220,7 @@ def configureLoggingServer(connection, sensorDomains, email, logger):
     kibanaCertsPath = f"{kibanaPath}/certs"
 
     installConfigureElasticsearch(
-        connection, email, elasticPath, elasticCertsPath, kibanaCertsPath, logger
+        connection, email, elasticPath, elasticCertsPath, kibanaCertsPath
     )
 
     # create custom SSL renewal shell script and copy it to logging server
@@ -230,7 +235,7 @@ def configureLoggingServer(connection, sensorDomains, email, logger):
     # block until elasticsearch service (port 64298) is ready
     waitForService(connection.host, 64298)
 
-    elasticPass = configureKibana(connection, kibanaPath, kibanaCertsPath, logger)
+    elasticPass = configureKibana(connection, kibanaPath, kibanaCertsPath)
 
     waitForService(connection.host, 64298)
 
@@ -273,16 +278,13 @@ def configureLoggingServer(connection, sensorDomains, email, logger):
     )
 
 
-def deployNetwork(
-    loggingServer=True, credsFile="credentials.json", logFile="deployment.log"
-):
+def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     """Set up entire distributed T-Pot network with logging and sensor servers
 
     :loggingServer: optional, whether to set up central logging server. Defaults to
     True. Set to False if you already have deployed a logging server and want to
     only add sensor server(s)
     :credsFile: optional, path to credentials JSON file. Defaults to credentials.json
-    :logFile: optional, path to log file. Defaults to deployment.log
     :returns: None
 
     """
@@ -297,13 +299,6 @@ def deployNetwork(
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
 
-    logging.basicConfig(
-        filename=logFile,
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
-    logger = logging.getLogger(__name__)
-
     logConn = Connection(
         host=logCreds["host"],
         user="root",
@@ -312,7 +307,7 @@ def deployNetwork(
     if loggingServer:
         # set up central logging server
         sensorHosts = [sensor["host"] for sensor in sensorCreds]
-        configureLoggingServer(logConn, sensorHosts, logCreds["email"], logger)
+        configureLoggingServer(logConn, sensorHosts, logCreds["email"])
 
     # retrieve SSL certificate and SSH public key from logging server
     logConn.get("/etc/elasticsearch/certs/fullchain.pem")
@@ -325,7 +320,7 @@ def deployNetwork(
             user="root",
             connect_kwargs={"password": sensor["password"]},
         )
-        installTPot(index + 1, sensorConn, logConn, logger)
+        installTPot(index + 1, sensorConn, logConn)
 
         sensorConn.close()
 
