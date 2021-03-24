@@ -8,9 +8,10 @@ from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
 from configFuncs import (createElasticsearchYml, createKibanaYml,
-                         createLogstashConf, createTPotUser,
-                         createUpdateCertsSh, importKibanaObjects)
-from deploymentHelpers import generateSSLCerts, installPackages, setupCurator
+                         createLogstashConf, createUpdateCertsSh)
+from deploymentHelpers import (createTPotUser, generateSSLCerts,
+                               importKibanaObjects, installPackages,
+                               setupCurator)
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
 
