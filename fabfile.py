@@ -302,7 +302,6 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     logConn = Connection(
         host=logCreds["host"],
         user="root",
-        connect_kwargs={"password": logCreds["password"]},
     )
     if loggingServer:
         # set up central logging server
@@ -318,7 +317,6 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
         sensorConn = Connection(
             host=sensor["host"],
             user="root",
-            connect_kwargs={"password": sensor["password"]},
         )
         installTPot(index + 1, sensorConn, logConn)
 

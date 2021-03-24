@@ -28,9 +28,8 @@
   - `logging.host` should be the domain name that you would use to SSH into the server, configured through the DNS A record previously set up
     - So if you would SSH into the logging server with `ssh root@subdomain.mydomain.com`, then `logging.host` would be `"subdomain.mydomain.com"`
     - Note that this project does not yet support users other than `root` for any of the servers
-  - `logging.password` should be the root password to SSH into the server
   - `logging.email` should be the email address to give to Certbot for notifications about SSL certificates expiring, etc.
-  - Add a new object in the `sensors` array for each sensor server you would like to set up and fill in the `host` and `password` fields for each
+  - Add a new object in the `sensors` array for each sensor server you would like to set up and fill in the `host` field for each
     - The `host` field may be a raw IP address if you did not set up DNS records for the sensor servers, but it is recommended to create A records for each sensor
 - Run `python3 fabfile.py` to configure the logging server and all sensor servers defined in `credentials.json`. The entire process will take ~10 minutes for the logging server + ~10 minutes for each sensor server, and logs will be written to `deployment.log`
 - Once the script finishes, you can access the logging server's Kibana dashboard at https://your.chosen.domain.com:5601
