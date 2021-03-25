@@ -3,7 +3,7 @@ import logging
 import os
 import time
 
-from fabric import Connection
+from fabric import Config, Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
@@ -281,6 +281,24 @@ def configureLoggingServer(connection, sensorDomains, email):
     )
 
 
+def createAllSudoUsers(loggingObject, sensorObjects):
+    """Create non-root sudo users on all servers in network
+
+    :loggingObject: logging server dictionary from credentials.json
+    :sensorObjects: list of sensor server dictionaries from credentials.json
+    :returns: name of user created on all servers
+
+    """
+    deploymentUser = "tpotadmin"
+
+    for creds in [loggingObject] + sensorObjects:
+        conn = Connection(host=creds["host"], user="root")
+        createSudoUser(conn, deploymentUser, creds["sudopass"])
+        conn.close()
+
+    return deploymentUser
+
+
 def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     """Set up entire distributed T-Pot network with logging and sensor servers
 
@@ -302,12 +320,18 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
 
+    sudoUser = createAllSudoUsers(logCreds, sensorCreds)
+
     logConn = Connection(
         host=logCreds["host"],
-        user="root",
+        user=sudoUser,
+        config=Config(overrides={"sudo": {"password": logCreds["sudopass"]}}),
     )
+
     if loggingServer:
         # set up central logging server
+
+        # this will have to be updated to include sudo usernames for SSL renewal
         sensorHosts = [sensor["host"] for sensor in sensorCreds]
         configureLoggingServer(logConn, sensorHosts, logCreds["email"])
 
@@ -315,17 +339,18 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     logConn.get("/etc/elasticsearch/certs/fullchain.pem")
     logConn.get(".ssh/id_rsa.pub")
 
+    logConn.close()
+
     # set up all sensor servers (make this async soon?)
     for index, sensor in enumerate(sensorCreds):
         sensorConn = Connection(
             host=sensor["host"],
-            user="root",
+            user=sudoUser,
+            config=Config(overrides={"sudo": {"password": sensor["sudopass"]}}),
         )
         installTPot(index + 1, sensorConn)
 
         sensorConn.close()
-
-    logConn.close()
 
     os.remove("fullchain.pem")
     os.remove("id_rsa.pub")
