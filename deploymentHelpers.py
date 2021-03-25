@@ -12,7 +12,7 @@ from utils import findPassword
 
 
 def createSudoUser(rootConnection, username, sudopass):
-    """Create a non-root user with sudo privileges
+    """Create a non-root user with sudo privileges and edit SSH config file for security
 
     :rootConnection: fabric.Connection object with root (important) connection to server
     :username: username of new user to create
@@ -20,6 +20,7 @@ def createSudoUser(rootConnection, username, sudopass):
     :returns: None
 
     """
+    # add sudo user
     rootConnection.run(
         f'adduser --quiet --disabled-password --gecos "" {username}', hide="stdout"
     )
@@ -30,6 +31,16 @@ def createSudoUser(rootConnection, username, sudopass):
         f"cp /root/.ssh/authorized_keys /home/{username}/.ssh/", hide="stdout"
     )
     rootConnection.run(f"chmod +r /home/{username}/.ssh/authorized_keys", hide="stdout")
+
+    # edit SSH config file and restart SSH service
+    sshConf = "/etc/ssh/sshd_config"
+    rootConnection.run(
+        f"sed -i '/PasswordAuthentication\\|PermitRootLogin/d' {sshConf}",
+        hide="stdout",
+    )
+    rootConnection.run(f'echo "PermitRootLogin no" >> {sshConf}', hide="stdout")
+    rootConnection.run(f'echo "PasswordAuthentication no" >> {sshConf}', hide="stdout")
+    rootConnection.run("systemctl restart sshd", hide="stdout")
 
 
 def installPackages(connection, packageList):
