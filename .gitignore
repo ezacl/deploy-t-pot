@@ -8,5 +8,6 @@ passwords.txt
 logstash.conf
 credentials.json
 updateCerts.sh
+sudoTest.py
 
 venv

@@ -11,6 +11,27 @@ from errors import BadAPIRequestError, NotCreatedError
 from utils import findPassword
 
 
+def createSudoUser(rootConnection, username, sudopass):
+    """Create a non-root user with sudo privileges
+
+    :rootConnection: fabric.Connection object with root (important) connection to server
+    :username: username of new user to create
+    :sudopass: sudo password for new user
+    :returns: None
+
+    """
+    rootConnection.run(
+        f'adduser --quiet --disabled-password --gecos "" {username}', hide="stdout"
+    )
+    rootConnection.run(f'echo "{username}:{sudopass}" | chpasswd', hide="stdout")
+    rootConnection.run(f"usermod -aG sudo {username}", hide="stdout")
+    rootConnection.run(f"mkdir /home/{username}/.ssh", hide="stdout")
+    rootConnection.run(
+        f"cp /root/.ssh/authorized_keys /home/{username}/.ssh/", hide="stdout"
+    )
+    rootConnection.run(f"chmod +r /home/{username}/.ssh/authorized_keys", hide="stdout")
+
+
 def installPackages(connection, packageList):
     """Install packages on server using apt-get
 
