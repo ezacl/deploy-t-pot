@@ -30,7 +30,10 @@ def createSudoUser(rootConnection, username, sudopass):
     rootConnection.run(
         f"cp /root/.ssh/authorized_keys /home/{username}/.ssh/", hide="stdout"
     )
-    rootConnection.run(f"chmod +r /home/{username}/.ssh/authorized_keys", hide="stdout")
+    rootConnection.run(
+        f"chown -R {username}:{username} /home/{username}/.ssh", hide="stdout"
+    )
+    rootConnection.run(f"chmod 700 /home/{username}/.ssh", hide="stdout")
 
     # edit SSH config file and restart SSH service
     sshConf = "/etc/ssh/sshd_config"
@@ -52,12 +55,9 @@ def installPackages(connection, packageList):
 
     """
     packageStr = " ".join(packageList)
-    connection.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
-    connection.run(
-        f"apt-get --yes install {packageStr}",
-        pty=True,
-        hide="stdout",
-    )
+    connection.sudo("apt-get update", hide=True)
+    connection.sudo("apt-get --yes upgrade", hide=True)
+    connection.sudo(f"apt-get --yes install {packageStr}", hide=True)
 
 
 def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
@@ -70,24 +70,25 @@ def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
     :returns: None
 
     """
-    connection.run(f"mkdir {elasticCertsPath}", hide="stdout")
-    connection.run(f"mkdir {kibanaCertsPath}", hide="stdout")
+    connection.sudo(f"mkdir {elasticCertsPath}", hide=True)
+    connection.sudo(f"mkdir {kibanaCertsPath}", hide=True)
 
-    connection.run(
+    connection.sudo(
         f"certbot certonly --standalone -d {connection.host} --non-interactive"
         f" --agree-tos --email {email}",
-        hide="stdout",
+        hide=True,
     )
 
     # tried to symlink these instead, but kept on getting permission errors in ES logs
-    connection.run(
-        f"cp /etc/letsencrypt/live/{connection.host}/* {elasticCertsPath}/",
-        hide="stdout",
+    # must run sh -c for * glob pattern to be correctly interpreted by bash
+    connection.sudo(
+        f"sh -c 'cp /etc/letsencrypt/live/{connection.host}/* {elasticCertsPath}/'",
+        hide=True,
     )
-    connection.run(f"chmod 644 {elasticCertsPath}/privkey.pem", hide="stdout")
+    connection.sudo(f"chmod 644 {elasticCertsPath}/privkey.pem", hide=True)
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
-    connection.run(f"cp {elasticCertsPath}/* {kibanaCertsPath}/", hide="stdout")
+    connection.sudo(f"sh -c 'cp {elasticCertsPath}/* {kibanaCertsPath}/'", hide=True)
 
 
 def setupCurator(connection, configPath, elasticPass):
@@ -100,18 +101,19 @@ def setupCurator(connection, configPath, elasticPass):
 
     """
     # commands to set up elasticsearch-curator to delete old indices
-    connection.run("mkdir /var/log/curator", hide="stdout")
+    connection.sudo("mkdir /var/log/curator", hide=True)
 
     curatorConfigPath = createCuratorConfigYml(connection.host, elasticPass)
-    connection.put(curatorConfigPath, remote=configPath)
-    connection.put("configFiles/curatorActions.yml", remote=configPath)
+    connection.put(curatorConfigPath)
+    connection.put("configFiles/curatorActions.yml")
+    connection.sudo(f"mv curatorConfig.yml curatorActions.yml {configPath}", hide=True)
 
-    # add cronjob to run curator every day at midnight
+    # add cronjob to run curator every day at midnight (curator needs root)
     curatorCommand = (
-        f"curator --config {configPath}curatorConfig.yml"
+        f"0 0 * * * root curator --config {configPath}curatorConfig.yml"
         f" {configPath}curatorActions.yml"
     )
-    connection.run(f'echo "{curatorCommand}" >> /etc/crontab')
+    connection.sudo(f"sh -c 'echo \"{curatorCommand}\" >> /etc/crontab'", hide=True)
 
 
 def createTPotRole(hostPort, creatorUser, creatorPwd):

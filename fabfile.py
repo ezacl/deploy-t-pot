@@ -94,35 +94,43 @@ def installConfigureElasticsearch(
 
     # copy vimrc over for convenience
     conn.put("configFiles/.vimrc")
+    conn.sudo("cp .vimrc /root/", hide=True)
 
     logger.info("Logger: Updated packages and installed ELK dependencies")
 
-    # this gives
-    # "Warning: apt-key output should not be parsed (stdout is not a terminal)"
-    # can add pty=True to suppress it, but should find a fundamentally better way
+    # download public signing keys
+    artifactsKey = "elasticsearchArtifactsKey"
+    packagesKey = "elasticsearchPackagesKey"
     conn.run(
         "wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch"
-        " | apt-key add -",
-        pty=True,
+        f" > {artifactsKey}",
         hide="stdout",
     )
     conn.run(
         "wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch"
-        " | apt-key add -",
-        pty=True,
+        f" > {packagesKey}",
         hide="stdout",
     )
-    # this needs sudo tee if not already run as root
+    # install pubilc signing keys
+    # this gives
+    # "Warning: apt-key output should not be parsed (stdout is not a terminal)"
+    # can add pty=True to suppress it, but should find a fundamentally better way
+    conn.sudo(f"apt-key add {artifactsKey}", pty=True, hide=True)
+    conn.sudo(f"apt-key add {packagesKey}", pty=True, hide=True)
+    conn.run(f"rm {artifactsKey} {packagesKey}", hide="stdout")
+
+    # save repository definitions
     conn.run(
         'echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main"'
-        " | tee /etc/apt/sources.list.d/elastic-7.x.list",
+        " > elastic-7.x.list",
         hide="stdout",
     )
     conn.run(
         'echo "deb [arch=amd64] https://packages.elastic.co/curator/5/debian9 stable'
-        ' main" >> /etc/apt/sources.list.d/elastic-7.x.list',
+        ' main" >> elastic-7.x.list',
         hide="stdout",
     )
+    conn.sudo("mv elastic-7.x.list /etc/apt/sources.list.d/", hide=True)
 
     elkStack = ["elasticsearch", "kibana", "elasticsearch-curator"]
     installPackages(conn, elkStack)
@@ -142,10 +150,11 @@ def installConfigureElasticsearch(
     )
 
     # overwrite elasticsearch.yml in config directory
-    conn.put(ymlConfigPath, remote=f"{elasticPath}/elasticsearch.yml")
+    conn.put(ymlConfigPath)
+    conn.sudo(f"mv elasticsearch.yml {elasticPath}/elasticsearch.yml", hide=True)
     logger.info(f"Logger: Edited {elasticPath}/elasticsearch.yml")
 
-    conn.run("systemctl start elasticsearch.service", hide="stdout")
+    conn.sudo("systemctl start elasticsearch.service", hide=True)
     logger.info("Logger: Started elasticsearch service with systemd")
 
 
@@ -165,7 +174,7 @@ def configureKibana(conn, kibanaPath, kibanaCertsPath):
         response="y\n",
     )
     # create passwords for all ELK-related users
-    autoPasswords = conn.run(
+    autoPasswords = conn.sudo(
         "/usr/share/elasticsearch/bin/elasticsearch-setup-passwords auto",
         pty=True,
         watchers=[pwdSetupYes],
@@ -194,11 +203,12 @@ def configureKibana(conn, kibanaPath, kibanaCertsPath):
     )
 
     # overwrite kibana.yml in config directory
-    conn.put(ymlConfigPath, remote=f"{kibanaPath}/kibana.yml")
+    conn.put(ymlConfigPath)
+    conn.sudo(f"mv kibana.yml {kibanaPath}/kibana.yml", hide=True)
     logger.info(f"Logger: Edited {kibanaPath}/kibana.yml")
 
-    conn.run("systemctl restart elasticsearch.service", hide="stdout")
-    conn.run("systemctl start kibana.service", hide="stdout")
+    conn.sudo("systemctl restart elasticsearch.service", hide=True)
+    conn.sudo("systemctl start kibana.service", hide=True)
     logger.info("Logger: Started elasticsearch and kibana services with systemd")
 
     return elasticPass
@@ -215,7 +225,7 @@ def configureLoggingServer(connection, sensorDomains, email):
 
     """
     # generate SSH key
-    connection.run("ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''", hide="stdout")
+    connection.run("ssh-keygen -f ~/.ssh/id_rsa -t rsa -b 4096 -N ''", hide="stdout")
 
     elasticPath = "/etc/elasticsearch"
     elasticCertsPath = f"{elasticPath}/certs"
@@ -231,8 +241,9 @@ def configureLoggingServer(connection, sensorDomains, email):
         connection.host, sensorDomains, elasticCertsPath, kibanaPath
     )
     renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
-    connection.put(updateShPath, remote=renewHookPath)
-    connection.run(f"chmod +x {renewHookPath}", hide="stdout")
+    connection.put(updateShPath)
+    connection.sudo(f"mv updateCerts.sh {renewHookPath}", hide=True)
+    connection.sudo(f"chmod +x {renewHookPath}", hide=True)
     logger.info(f"Logger: Added custom SSL renewal script to {renewHookPath}")
 
     # block until elasticsearch service (port 64298) is ready
@@ -292,9 +303,12 @@ def createAllSudoUsers(loggingObject, sensorObjects):
     deploymentUser = "tpotadmin"
 
     for creds in [loggingObject] + sensorObjects:
-        conn = Connection(host=creds["host"], user="root")
+        host = creds["host"]
+        conn = Connection(host=host, user="root")
         createSudoUser(conn, deploymentUser, creds["sudopass"])
         conn.close()
+
+        logger.info(f"Created non-root sudo user {deploymentUser}@{host}")
 
     return deploymentUser
 
@@ -332,11 +346,14 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
         # set up central logging server
 
         # this will have to be updated to include sudo usernames for SSL renewal
+
         sensorHosts = [sensor["host"] for sensor in sensorCreds]
         configureLoggingServer(logConn, sensorHosts, logCreds["email"])
 
     # retrieve SSL certificate and SSH public key from logging server
-    logConn.get("/etc/elasticsearch/certs/fullchain.pem")
+    logConn.sudo("cp /etc/elasticsearch/certs/fullchain.pem ~/", hide=True)
+    logConn.get("fullchain.pem")
+    logConn.run("rm fullchain.pem")
     logConn.get(".ssh/id_rsa.pub")
 
     logConn.close()
