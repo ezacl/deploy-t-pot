@@ -39,8 +39,10 @@ def installTPot(number, sensorConn):
 
     # copy vimrc over for convenience
     sensorConn.put("configFiles/.vimrc")
+    sensorConn.sudo("cp .vimrc /root/", hide=True)
 
     # copy SSH public key to sensor server to transfer files from logging server
+    # (directly transferring it to .ssh/authorized_keys will overwrite previous ones)
     tempPubKey = ".ssh/logging_pubkey"
     sensorConn.put("id_rsa.pub", remote=tempPubKey)
     sensorConn.run(f"cat {tempPubKey} >> .ssh/authorized_keys")
@@ -49,29 +51,33 @@ def installTPot(number, sensorConn):
     tPotPath = "/opt/tpot"
 
     # must clone into /opt/tpot/ because of altered install.sh script
-    sensorConn.run(
-        f"git clone https://github.com/ezacl/tpotce-light {tPotPath}", hide="stdout"
+    sensorConn.sudo(
+        f"git clone https://github.com/ezacl/tpotce-light {tPotPath}", hide=True
     )
     logger.info(f"Sensor {number}: Cloned T-Pot into {tPotPath}")
 
-    with sensorConn.cd(f"{tPotPath}/iso/installer/"):
-        # can add hide="stdout" as always but good to see real time output of
-        # T-Pot installation
-        sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
-        logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
+    # can add hide="stdout" as always but good to see real time output of
+    # T-Pot installation
+    sensorConn.sudo(
+        f"{tPotPath}/iso/installer/install.sh --type=auto"
+        " --conf={tPotPath}/iso/installer/tpot.conf"
+    )
+    logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
 
     dataPath = "/data/elk/"
 
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
-    sensorConn.put("configFiles/logstash.conf", remote=dataPath)
+    sensorConn.put("configFiles/logstash.conf")
+    sensorConn.sudo(f"mv logstash.conf {dataPath}", hide=True)
 
     # copy SSL certificate over (copied to local machine in deployNetwork)
-    sensorConn.put("fullchain.pem", remote=dataPath)
+    sensorConn.put("fullchain.pem")
+    sensorConn.sudo(f"mv fullchain.pem {dataPath}", hide=True)
     logger.info(f"Sensor {number}: Copied certificate from logging server")
 
     # rebooting server always throws an exception, so ignore
     try:
-        sensorConn.run("reboot", hide="stdout")
+        sensorConn.sudo("reboot", hide=True)
     except UnexpectedExit:
         logger.info(f"Sensor {number}: Installed T-Pot and rebooted sensor server")
 
