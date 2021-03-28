@@ -63,7 +63,7 @@ def installTPot(number, sensorConn):
     # T-Pot installation
     sensorConn.sudo(
         f"{tPotPath}/iso/installer/install.sh --type=auto"
-        " --conf={tPotPath}/iso/installer/tpot.conf"
+        f" --conf={tPotPath}/iso/installer/tpot.conf"
     )
     logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
 
@@ -301,17 +301,21 @@ def configureLoggingServer(connection, sensorDomains, email):
     )
 
 
-def createAllSudoUsers(loggingObject, sensorObjects):
+def createAllSudoUsers(sensorObjects, loggingObject=None):
     """Create non-root sudo users on all servers in network
 
-    :loggingObject: logging server dictionary from credentials.json
     :sensorObjects: list of sensor server dictionaries from credentials.json
+    :loggingObject: optional, logging server dictionary from credentials.json
     :returns: name of user created on all servers
 
     """
     deploymentUser = "tpotadmin"
 
-    for creds in [loggingObject] + sensorObjects:
+    objsList = (
+        [loggingObject] + sensorObjects if loggingObject is not None else sensorObjects
+    )
+
+    for creds in objsList:
         host = creds["host"]
         conn = Connection(host=host, user="root")
         createSudoUser(conn, deploymentUser, creds["sudopass"])
@@ -343,7 +347,10 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
 
-    sudoUser = createAllSudoUsers(logCreds, sensorCreds)
+    if loggingServer:
+        sudoUser = createAllSudoUsers(sensorCreds, logCreds)
+    else:
+        sudoUser = createAllSudoUsers(sensorCreds)
 
     logConn = Connection(
         host=logCreds["host"],
