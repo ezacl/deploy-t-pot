@@ -1,18 +1,21 @@
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 
 from fabric import Config, Connection
 from invoke import Responder
+from invoke.config import Config as InvokeConfig
+from invoke.context import Context
 from invoke.exceptions import UnexpectedExit
 
 from configFuncs import (createElasticsearchYml, createKibanaYml,
                          createLogstashConf, createUpdateCertsSh)
 from deploymentHelpers import (createSudoUser, createTPotUser,
                                generateSSLCerts, importKibanaObjects,
-                               installPackages, setupCurator)
+                               installPackages, setupCurator, transferSSLCerts)
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
 
@@ -86,7 +89,7 @@ def installTPot(number, sensorConn):
 
 
 def installConfigureElasticsearch(
-    conn, email, elasticPath, elasticCertsPath, kibanaCertsPath
+    conn, email, elasticPath, elasticCertsPath, kibanaCertsPath, localCertDir
 ):
     """Install ELK stack and configure Elasticsearch on logging server
 
@@ -95,6 +98,7 @@ def installConfigureElasticsearch(
     :elasticPath: path to elasticsearch configuration directory
     :elasticCertsPath: path to elasticsearch SSL certificate directory
     :kibanaCertsPath: path to kibana SSL certificate directory
+    :localCertDir: TODO
     :returns: None
 
     """
@@ -145,8 +149,14 @@ def installConfigureElasticsearch(
     installPackages(conn, elkStack)
     logger.info("Logger: Installed elasticsearch, kibana, and elasticsearch-curator")
 
-    generateSSLCerts(conn, email, elasticCertsPath, kibanaCertsPath)
+    # FIX THISSSSSSSSSSS
 
+    # generateSSLCerts(conn, email, elasticCertsPath, kibanaCertsPath)
+
+    # PASS THE PATHS TO THIS INSTEAD OF HARDCODING THEM IN THE FUNCTION
+    transferSSLCerts(conn, localCertDir)
+
+    # fix me TODO
     logger.info(
         "Logger: Generated SSL certificates with Certbot and copied them to"
         f" {elasticCertsPath} and {kibanaCertsPath}"
@@ -223,17 +233,18 @@ def configureKibana(conn, kibanaPath, kibanaCertsPath):
     return elasticPass
 
 
-def configureLoggingServer(connection, sensorDomains, email):
+def configureLoggingServer(connection, sensorDomains, email, localCertDir):
     """Completely set up logging server for it to be ready to receive honeypot data
     from sensor servers
 
     :connection: fabric.Connection object with connection to logging server (8 GB RAM)
     :sensorDomains: list of FQDNs or IP addresses of sensor servers
     :email: email address to receive Certbot notifications
+    :localCertDir: TODO
     :returns: None
 
     """
-    # generate SSH key
+    # generate SSH key, NOW USELESS SO REMOVE TODO
     connection.run("ssh-keygen -f ~/.ssh/id_rsa -t rsa -b 4096 -N ''", hide="stdout")
 
     elasticPath = "/etc/elasticsearch"
@@ -242,10 +253,10 @@ def configureLoggingServer(connection, sensorDomains, email):
     kibanaCertsPath = f"{kibanaPath}/certs"
 
     installConfigureElasticsearch(
-        connection, email, elasticPath, elasticCertsPath, kibanaCertsPath
+        connection, email, elasticPath, elasticCertsPath, kibanaCertsPath, localCertDir
     )
 
-    # create custom SSL renewal shell script and copy it to logging server
+    # create custom SSL renewal shell script and copy it to logging server USELESS NOW TODO
     updateShPath = createUpdateCertsSh(
         connection.host, sensorDomains, elasticCertsPath, kibanaPath
     )
@@ -340,12 +351,20 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
         # get server credentials from credentials file
         with open(credsFile) as f:
             credentials = json.load(f)
+            deploymentCreds = credentials["deployment"]
             logCreds = credentials["logging"]
             sensorCreds = credentials["sensors"]
     except FileNotFoundError:
         raise NoCredentialsFileError(
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
+
+    deploymentConf = InvokeConfig()
+    deploymentConf.sudo.password = deploymentCreds["sudopass"]
+    deploymentConn = Context(config=deploymentConf)
+    tempCertPath = generateSSLCerts(
+        deploymentConn, deploymentCreds["email"], logCreds["host"]
+    )
 
     if loggingServer:
         sudoUser = createAllSudoUsers(sensorCreds, logCreds)
@@ -364,7 +383,7 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
         # this will have to be updated to include sudo usernames for SSL renewal
 
         sensorHosts = [sensor["host"] for sensor in sensorCreds]
-        configureLoggingServer(logConn, sensorHosts, logCreds["email"])
+        configureLoggingServer(logConn, sensorHosts, logCreds["email"], tempCertPath)
 
     # retrieve SSL certificate and SSH public key from logging server
     logConn.sudo("cp /etc/elasticsearch/certs/fullchain.pem ~/", hide=True)
@@ -387,6 +406,9 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
 
     os.remove("fullchain.pem")
     os.remove("id_rsa.pub")
+
+    # remove temporarily copied SSL certs
+    shutil.rmtree(tempCertPath)
 
 
 if __name__ == "__main__":

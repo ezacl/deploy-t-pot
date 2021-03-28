@@ -60,35 +60,86 @@ def installPackages(connection, packageList):
     connection.sudo(f"apt-get --yes install {packageStr}", hide=True)
 
 
-def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
+# def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
+def generateSSLCerts(localConn, email, loggingHost, apiTokenPath="digitalocean.ini"):
     """Generate SSL certificates on logging server using Certbot
 
-    :connection: fabric.Connection object to logging server
+    :connection: fabric.Connection object to deployment server
     :email: email address to receive Certbot notifications
     :elasticCertsPath: path to elasticsearch SSL certificate directory
     :kibanaCertsPath: path to kibana SSL certificate directory
     :returns: None
 
     """
-    connection.sudo(f"mkdir {elasticCertsPath}", hide=True)
-    connection.sudo(f"mkdir {kibanaCertsPath}", hide=True)
-
-    connection.sudo(
-        f"certbot certonly --standalone -d {connection.host} --non-interactive"
-        f" --agree-tos --email {email}",
+    certbotPackages = ["certbot", "python3-certbot-dns-digitalocean"]
+    installPackages(localConn, certbotPackages)
+    localConn.run(f"chmod 600 {apiTokenPath}", hide="stdout")
+    localConn.sudo(
+        f"certbot certonly --non-interactive --agree-tos --email {email}"
+        f" --dns-digitalocean --dns-digitalocean-credentials {apiTokenPath}"
+        f" -d {loggingHost}",
         hide=True,
     )
 
-    # tried to symlink these instead, but kept on getting permission errors in ES logs
-    # must run sh -c for * glob pattern to be correctly interpreted by bash
-    connection.sudo(
-        f"sh -c 'cp /etc/letsencrypt/live/{connection.host}/* {elasticCertsPath}/'",
-        hide=True,
+    # need to copy certs into temporary directory that doesn't need sudo access
+    # in order to later copy certs to other servers
+    tempCertDir = "certs"
+    localConn.run(f"mkdir {tempCertDir}", hide="stdout")
+    localConn.sudo(
+        f"sh -c 'cp /etc/letsencrypt/live/{loggingHost}/* {tempCertDir}/'", hide=True
     )
-    connection.sudo(f"chmod 644 {elasticCertsPath}/privkey.pem", hide=True)
+    localConn.sudo(f"chmod +r {tempCertDir}/privkey.pem", hide=True)
 
-    # copying certificates isn't good but I couldn't get it to work with symlinks
-    connection.sudo(f"sh -c 'cp {elasticCertsPath}/* {kibanaCertsPath}/'", hide=True)
+    # this has to be deleted after files are transferred for security reasons
+    return tempCertDir
+
+    # connection.sudo(f"mkdir {elasticCertsPath}", hide=True)
+    # connection.sudo(f"mkdir {kibanaCertsPath}", hide=True)
+
+    # connection.sudo(
+    #     f"certbot certonly --standalone -d {connection.host} --non-interactive"
+    #     f" --agree-tos --email {email}",
+    #     hide=True,
+    # )
+
+    # # tried to symlink these instead, but kept on getting permission errors in ES logs
+    # # must run sh -c for * glob pattern to be correctly interpreted by bash
+    # connection.sudo(
+    #     f"sh -c 'cp /etc/letsencrypt/live/{connection.host}/* {elasticCertsPath}/'",
+    #     hide=True,
+    # )
+    # connection.sudo(f"chmod 644 {elasticCertsPath}/privkey.pem", hide=True)
+
+    # # copying certificates isn't good but I couldn't get it to work with symlinks
+    # connection.sudo(f"sh -c 'cp {elasticCertsPath}/* {kibanaCertsPath}/'", hide=True)
+
+
+def transferSSLCerts(connection, certDir, loggingServer=True):
+    """TODO: Docstring for transferSSLCerts.
+
+    :connection: TODO
+    :certDir: TODO
+    :loggingServer: TODO
+    :returns: TODO
+
+    """
+    if loggingServer:
+        connection.run("mkdir certs", hide="stdout")
+
+        for file in os.listdir(certDir):
+            connection.put(f"{certDir}/{file}", remote="certs/")
+
+        connection.sudo("mv certs /etc/elasticsearch/", hide=True)
+        # may have to chown to elasticsearch after moving the certs, but idk
+        connection.sudo("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide=True)
+        connection.sudo("mkdir /etc/kibana/certs", hide=True)
+        connection.sudo(
+            "sh -c 'cp /etc/elasticsearch/certs/* /etc/kibana/certs/'", hide=True
+        )
+    else:
+        # if need to transfer certs to sensor server
+        connection.put(f"{certDir}/fullchain.pem")
+        connection.sudo("mv fullchain.pem /data/elk/", hide=True)
 
 
 def setupCurator(connection, configPath, elasticPass):
