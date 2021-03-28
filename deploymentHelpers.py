@@ -165,8 +165,9 @@ def createTPotRole(hostPort, creatorUser, creatorPwd):
         roleResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before elasticsearch service is ready
-        print(roleResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{roleResp.text}\nBad API request. See response above."
+        )
 
     # creating the same role twice will not change anything
     if not roleResp.json()["role"]["created"]:
@@ -203,8 +204,6 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
             secrets.choice(string.ascii_letters + string.digits) for _ in range(20)
         )
 
-        print(f"Password for user {userName}: {createdPwd}")
-
     userData = {
         "roles": [
             roleName,
@@ -226,8 +225,9 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
         userResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before elasticsearch service is ready
-        print(userResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{userResp.text}\nBad API request. See response above."
+        )
 
     # creating the same user twice will not change anything
     if not userResp.json()["created"]:
@@ -287,8 +287,9 @@ def importKibanaObjects(hostPort, userName, password):
         importResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before kibana service is ready
-        print(importResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{importResp.text}\nBad API request. See response above."
+        )
 
     # enable kibaana dark mode
     darkModeResp = requests.post(
@@ -302,5 +303,6 @@ def importKibanaObjects(hostPort, userName, password):
         darkModeResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before kibana service is ready
-        print(darkModeResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{darkModeResp.text}\nBad API request. See response above."
+        )

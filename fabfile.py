@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import sys
 import time
 
 from fabric import Config, Connection
@@ -23,6 +24,8 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+# log to both stdout and log file
+logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
 def installTPot(number, sensorConn):
