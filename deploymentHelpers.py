@@ -6,8 +6,44 @@ from zipfile import ZipFile
 import requests
 from requests.exceptions import HTTPError
 
+from configFuncs import createCuratorConfigYml
 from errors import BadAPIRequestError, NotCreatedError
-from utils import createCuratorConfigYml, findPassword
+from utils import findPassword
+
+
+def createSudoUser(rootConnection, username, sudopass):
+    """Create a non-root user with sudo privileges and edit SSH config file for security
+
+    :rootConnection: fabric.Connection object with root (important) connection to server
+    :username: username of new user to create
+    :sudopass: sudo password for new user
+    :returns: None
+
+    """
+    # add sudo user
+    rootConnection.run(
+        f'adduser --quiet --disabled-password --gecos "" {username}', hide="stdout"
+    )
+    rootConnection.run(f'echo "{username}:{sudopass}" | chpasswd', hide="stdout")
+    rootConnection.run(f"usermod -aG sudo {username}", hide="stdout")
+    rootConnection.run(f"mkdir /home/{username}/.ssh", hide="stdout")
+    rootConnection.run(
+        f"cp /root/.ssh/authorized_keys /home/{username}/.ssh/", hide="stdout"
+    )
+    rootConnection.run(
+        f"chown -R {username}:{username} /home/{username}/.ssh", hide="stdout"
+    )
+    rootConnection.run(f"chmod 700 /home/{username}/.ssh", hide="stdout")
+
+    # edit SSH config file and restart SSH service
+    sshConf = "/etc/ssh/sshd_config"
+    rootConnection.run(
+        f"sed -i '/PasswordAuthentication\\|PermitRootLogin/d' {sshConf}",
+        hide="stdout",
+    )
+    rootConnection.run(f'echo "PermitRootLogin no" >> {sshConf}', hide="stdout")
+    rootConnection.run(f'echo "PasswordAuthentication no" >> {sshConf}', hide="stdout")
+    rootConnection.run("systemctl restart sshd", hide="stdout")
 
 
 def installPackages(connection, packageList):
@@ -19,12 +55,9 @@ def installPackages(connection, packageList):
 
     """
     packageStr = " ".join(packageList)
-    connection.run("apt-get update && apt-get --yes upgrade", pty=True, hide="stdout")
-    connection.run(
-        f"apt-get --yes install {packageStr}",
-        pty=True,
-        hide="stdout",
-    )
+    connection.sudo("apt-get update", hide=True)
+    connection.sudo("apt-get --yes upgrade", hide=True)
+    connection.sudo(f"apt-get --yes install {packageStr}", hide=True)
 
 
 def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
@@ -37,24 +70,25 @@ def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
     :returns: None
 
     """
-    connection.run(f"mkdir {elasticCertsPath}", hide="stdout")
-    connection.run(f"mkdir {kibanaCertsPath}", hide="stdout")
+    connection.sudo(f"mkdir {elasticCertsPath}", hide=True)
+    connection.sudo(f"mkdir {kibanaCertsPath}", hide=True)
 
-    connection.run(
+    connection.sudo(
         f"certbot certonly --standalone -d {connection.host} --non-interactive"
         f" --agree-tos --email {email}",
-        hide="stdout",
+        hide=True,
     )
 
     # tried to symlink these instead, but kept on getting permission errors in ES logs
-    connection.run(
-        f"cp /etc/letsencrypt/live/{connection.host}/* {elasticCertsPath}/",
-        hide="stdout",
+    # must run sh -c for * glob pattern to be correctly interpreted by bash
+    connection.sudo(
+        f"sh -c 'cp /etc/letsencrypt/live/{connection.host}/* {elasticCertsPath}/'",
+        hide=True,
     )
-    connection.run(f"chmod 644 {elasticCertsPath}/privkey.pem", hide="stdout")
+    connection.sudo(f"chmod 644 {elasticCertsPath}/privkey.pem", hide=True)
 
     # copying certificates isn't good but I couldn't get it to work with symlinks
-    connection.run(f"cp {elasticCertsPath}/* {kibanaCertsPath}/", hide="stdout")
+    connection.sudo(f"sh -c 'cp {elasticCertsPath}/* {kibanaCertsPath}/'", hide=True)
 
 
 def setupCurator(connection, configPath, elasticPass):
@@ -67,18 +101,19 @@ def setupCurator(connection, configPath, elasticPass):
 
     """
     # commands to set up elasticsearch-curator to delete old indices
-    connection.run("mkdir /var/log/curator", hide="stdout")
+    connection.sudo("mkdir /var/log/curator", hide=True)
 
     curatorConfigPath = createCuratorConfigYml(connection.host, elasticPass)
-    connection.put(curatorConfigPath, remote=configPath)
-    connection.put("configFiles/curatorActions.yml", remote=configPath)
+    connection.put(curatorConfigPath)
+    connection.put("configFiles/curatorActions.yml")
+    connection.sudo(f"mv curatorConfig.yml curatorActions.yml {configPath}", hide=True)
 
-    # add cronjob to run curator every day at midnight
+    # add cronjob to run curator every day at midnight (curator needs root)
     curatorCommand = (
-        f"curator --config {configPath}curatorConfig.yml"
+        f"0 0 * * * root curator --config {configPath}curatorConfig.yml"
         f" {configPath}curatorActions.yml"
     )
-    connection.run(f'echo "{curatorCommand}" >> /etc/crontab')
+    connection.sudo(f"sh -c 'echo \"{curatorCommand}\" >> /etc/crontab'", hide=True)
 
 
 def createTPotRole(hostPort, creatorUser, creatorPwd):
@@ -130,8 +165,9 @@ def createTPotRole(hostPort, creatorUser, creatorPwd):
         roleResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before elasticsearch service is ready
-        print(roleResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{roleResp.text}\nBad API request. See response above."
+        )
 
     # creating the same role twice will not change anything
     if not roleResp.json()["role"]["created"]:
@@ -168,8 +204,6 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
             secrets.choice(string.ascii_letters + string.digits) for _ in range(20)
         )
 
-        print(f"Password for user {userName}: {createdPwd}")
-
     userData = {
         "roles": [
             roleName,
@@ -191,8 +225,9 @@ def createTPotUser(hostPort, creatorUser, creatorPwd=None, createdPwd=None):
         userResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before elasticsearch service is ready
-        print(userResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{userResp.text}\nBad API request. See response above."
+        )
 
     # creating the same user twice will not change anything
     if not userResp.json()["created"]:
@@ -252,8 +287,9 @@ def importKibanaObjects(hostPort, userName, password):
         importResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before kibana service is ready
-        print(importResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{importResp.text}\nBad API request. See response above."
+        )
 
     # enable kibaana dark mode
     darkModeResp = requests.post(
@@ -267,5 +303,6 @@ def importKibanaObjects(hostPort, userName, password):
         darkModeResp.raise_for_status()
     except HTTPError:
         # Usually if API request is made before kibana service is ready
-        print(darkModeResp.text)
-        raise BadAPIRequestError("Bad API request. See response above.")
+        raise BadAPIRequestError(
+            f"{darkModeResp.text}\nBad API request. See response above."
+        )

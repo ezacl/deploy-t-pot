@@ -1,17 +1,18 @@
 import json
 import logging
 import os
+import sys
 import time
 
-from fabric import Connection
+from fabric import Config, Connection
 from invoke import Responder
 from invoke.exceptions import UnexpectedExit
 
 from configFuncs import (createElasticsearchYml, createKibanaYml,
                          createLogstashConf, createUpdateCertsSh)
-from deploymentHelpers import (createTPotUser, generateSSLCerts,
-                               importKibanaObjects, installPackages,
-                               setupCurator)
+from deploymentHelpers import (createSudoUser, createTPotUser,
+                               generateSSLCerts, importKibanaObjects,
+                               installPackages, setupCurator)
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
 
@@ -23,6 +24,8 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+# log to both stdout and log file
+logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
 def installTPot(number, sensorConn):
@@ -39,36 +42,45 @@ def installTPot(number, sensorConn):
 
     # copy vimrc over for convenience
     sensorConn.put("configFiles/.vimrc")
+    sensorConn.sudo("cp .vimrc /root/", hide=True)
 
     # copy SSH public key to sensor server to transfer files from logging server
-    sensorConn.put("id_rsa.pub", remote=".ssh/authorized_keys")
+    # (directly transferring it to .ssh/authorized_keys will overwrite previous ones)
+    tempPubKey = ".ssh/logging_pubkey"
+    sensorConn.put("id_rsa.pub", remote=tempPubKey)
+    sensorConn.run(f"cat {tempPubKey} >> .ssh/authorized_keys")
+    sensorConn.run(f"rm {tempPubKey}")
 
     tPotPath = "/opt/tpot"
 
     # must clone into /opt/tpot/ because of altered install.sh script
-    sensorConn.run(
-        f"git clone https://github.com/ezacl/tpotce-light {tPotPath}", hide="stdout"
+    sensorConn.sudo(
+        f"git clone https://github.com/ezacl/tpotce-light {tPotPath}", hide=True
     )
     logger.info(f"Sensor {number}: Cloned T-Pot into {tPotPath}")
 
-    with sensorConn.cd(f"{tPotPath}/iso/installer/"):
-        # can add hide="stdout" as always but good to see real time output of
-        # T-Pot installation
-        sensorConn.run("./install.sh --type=auto --conf=tpot.conf")
-        logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
+    # can add hide="stdout" as always but good to see real time output of
+    # T-Pot installation
+    sensorConn.sudo(
+        f"{tPotPath}/iso/installer/install.sh --type=auto"
+        f" --conf={tPotPath}/iso/installer/tpot.conf"
+    )
+    logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
 
     dataPath = "/data/elk/"
 
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
-    sensorConn.put("configFiles/logstash.conf", remote=dataPath)
+    sensorConn.put("configFiles/logstash.conf")
+    sensorConn.sudo(f"mv logstash.conf {dataPath}", hide=True)
 
     # copy SSL certificate over (copied to local machine in deployNetwork)
-    sensorConn.put("fullchain.pem", remote=dataPath)
+    sensorConn.put("fullchain.pem")
+    sensorConn.sudo(f"mv fullchain.pem {dataPath}", hide=True)
     logger.info(f"Sensor {number}: Copied certificate from logging server")
 
     # rebooting server always throws an exception, so ignore
     try:
-        sensorConn.run("reboot", hide="stdout")
+        sensorConn.sudo("reboot", hide=True)
     except UnexpectedExit:
         logger.info(f"Sensor {number}: Installed T-Pot and rebooted sensor server")
 
@@ -91,35 +103,43 @@ def installConfigureElasticsearch(
 
     # copy vimrc over for convenience
     conn.put("configFiles/.vimrc")
+    conn.sudo("cp .vimrc /root/", hide=True)
 
     logger.info("Logger: Updated packages and installed ELK dependencies")
 
-    # this gives
-    # "Warning: apt-key output should not be parsed (stdout is not a terminal)"
-    # can add pty=True to suppress it, but should find a fundamentally better way
+    # download public signing keys
+    artifactsKey = "elasticsearchArtifactsKey"
+    packagesKey = "elasticsearchPackagesKey"
     conn.run(
         "wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch"
-        " | apt-key add -",
-        pty=True,
+        f" > {artifactsKey}",
         hide="stdout",
     )
     conn.run(
         "wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch"
-        " | apt-key add -",
-        pty=True,
+        f" > {packagesKey}",
         hide="stdout",
     )
-    # this needs sudo tee if not already run as root
+    # install public signing keys
+    # this gives
+    # "Warning: apt-key output should not be parsed (stdout is not a terminal)"
+    # can add pty=True to suppress it, but should find a fundamentally better way
+    conn.sudo(f"apt-key add {artifactsKey}", pty=True, hide=True)
+    conn.sudo(f"apt-key add {packagesKey}", pty=True, hide=True)
+    conn.run(f"rm {artifactsKey} {packagesKey}", hide="stdout")
+
+    # save repository definitions
     conn.run(
         'echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main"'
-        " | tee /etc/apt/sources.list.d/elastic-7.x.list",
+        " > elastic-7.x.list",
         hide="stdout",
     )
     conn.run(
         'echo "deb [arch=amd64] https://packages.elastic.co/curator/5/debian9 stable'
-        ' main" >> /etc/apt/sources.list.d/elastic-7.x.list',
+        ' main" >> elastic-7.x.list',
         hide="stdout",
     )
+    conn.sudo("mv elastic-7.x.list /etc/apt/sources.list.d/", hide=True)
 
     elkStack = ["elasticsearch", "kibana", "elasticsearch-curator"]
     installPackages(conn, elkStack)
@@ -139,10 +159,11 @@ def installConfigureElasticsearch(
     )
 
     # overwrite elasticsearch.yml in config directory
-    conn.put(ymlConfigPath, remote=f"{elasticPath}/elasticsearch.yml")
+    conn.put(ymlConfigPath)
+    conn.sudo(f"mv elasticsearch.yml {elasticPath}/elasticsearch.yml", hide=True)
     logger.info(f"Logger: Edited {elasticPath}/elasticsearch.yml")
 
-    conn.run("systemctl start elasticsearch.service", hide="stdout")
+    conn.sudo("systemctl start elasticsearch.service", hide=True)
     logger.info("Logger: Started elasticsearch service with systemd")
 
 
@@ -162,7 +183,7 @@ def configureKibana(conn, kibanaPath, kibanaCertsPath):
         response="y\n",
     )
     # create passwords for all ELK-related users
-    autoPasswords = conn.run(
+    autoPasswords = conn.sudo(
         "/usr/share/elasticsearch/bin/elasticsearch-setup-passwords auto",
         pty=True,
         watchers=[pwdSetupYes],
@@ -191,11 +212,12 @@ def configureKibana(conn, kibanaPath, kibanaCertsPath):
     )
 
     # overwrite kibana.yml in config directory
-    conn.put(ymlConfigPath, remote=f"{kibanaPath}/kibana.yml")
+    conn.put(ymlConfigPath)
+    conn.sudo(f"mv kibana.yml {kibanaPath}/kibana.yml", hide=True)
     logger.info(f"Logger: Edited {kibanaPath}/kibana.yml")
 
-    conn.run("systemctl restart elasticsearch.service", hide="stdout")
-    conn.run("systemctl start kibana.service", hide="stdout")
+    conn.sudo("systemctl restart elasticsearch.service", hide=True)
+    conn.sudo("systemctl start kibana.service", hide=True)
     logger.info("Logger: Started elasticsearch and kibana services with systemd")
 
     return elasticPass
@@ -212,7 +234,7 @@ def configureLoggingServer(connection, sensorDomains, email):
 
     """
     # generate SSH key
-    connection.run("ssh-keygen -f ~/.ssh/id_rsa -t rsa -N ''", hide="stdout")
+    connection.run("ssh-keygen -f ~/.ssh/id_rsa -t rsa -b 4096 -N ''", hide="stdout")
 
     elasticPath = "/etc/elasticsearch"
     elasticCertsPath = f"{elasticPath}/certs"
@@ -228,8 +250,9 @@ def configureLoggingServer(connection, sensorDomains, email):
         connection.host, sensorDomains, elasticCertsPath, kibanaPath
     )
     renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
-    connection.put(updateShPath, remote=renewHookPath)
-    connection.run(f"chmod +x {renewHookPath}", hide="stdout")
+    connection.put(updateShPath)
+    connection.sudo(f"mv updateCerts.sh {renewHookPath}", hide=True)
+    connection.sudo(f"chmod +x {renewHookPath}", hide=True)
     logger.info(f"Logger: Added custom SSL renewal script to {renewHookPath}")
 
     # block until elasticsearch service (port 64298) is ready
@@ -278,6 +301,31 @@ def configureLoggingServer(connection, sensorDomains, email):
     )
 
 
+def createAllSudoUsers(sensorObjects, loggingObject=None):
+    """Create non-root sudo users on all servers in network
+
+    :sensorObjects: list of sensor server dictionaries from credentials.json
+    :loggingObject: optional, logging server dictionary from credentials.json
+    :returns: name of user created on all servers
+
+    """
+    deploymentUser = "tpotadmin"
+
+    objsList = (
+        [loggingObject] + sensorObjects if loggingObject is not None else sensorObjects
+    )
+
+    for creds in objsList:
+        host = creds["host"]
+        conn = Connection(host=host, user="root")
+        createSudoUser(conn, deploymentUser, creds["sudopass"])
+        conn.close()
+
+        logger.info(f"Created non-root sudo user {deploymentUser}@{host}")
+
+    return deploymentUser
+
+
 def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     """Set up entire distributed T-Pot network with logging and sensor servers
 
@@ -299,32 +347,43 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
 
+    if loggingServer:
+        sudoUser = createAllSudoUsers(sensorCreds, logCreds)
+    else:
+        sudoUser = createAllSudoUsers(sensorCreds)
+
     logConn = Connection(
         host=logCreds["host"],
-        user="root",
-        connect_kwargs={"password": logCreds["password"]},
+        user=sudoUser,
+        config=Config(overrides={"sudo": {"password": logCreds["sudopass"]}}),
     )
+
     if loggingServer:
         # set up central logging server
+
+        # this will have to be updated to include sudo usernames for SSL renewal
+
         sensorHosts = [sensor["host"] for sensor in sensorCreds]
         configureLoggingServer(logConn, sensorHosts, logCreds["email"])
 
     # retrieve SSL certificate and SSH public key from logging server
-    logConn.get("/etc/elasticsearch/certs/fullchain.pem")
+    logConn.sudo("cp /etc/elasticsearch/certs/fullchain.pem ~/", hide=True)
+    logConn.get("fullchain.pem")
+    logConn.run("rm fullchain.pem")
     logConn.get(".ssh/id_rsa.pub")
+
+    logConn.close()
 
     # set up all sensor servers (make this async soon?)
     for index, sensor in enumerate(sensorCreds):
         sensorConn = Connection(
             host=sensor["host"],
-            user="root",
-            connect_kwargs={"password": sensor["password"]},
+            user=sudoUser,
+            config=Config(overrides={"sudo": {"password": sensor["sudopass"]}}),
         )
-        installTPot(index + 1, sensorConn, logConn)
+        installTPot(index + 1, sensorConn)
 
         sensorConn.close()
-
-    logConn.close()
 
     os.remove("fullchain.pem")
     os.remove("id_rsa.pub")
