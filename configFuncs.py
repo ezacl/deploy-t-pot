@@ -73,12 +73,15 @@ def createLogstashConf(domainName, certPath, user, password):
         f.write(logConf)
 
 
-def createUpdateCertsSh(loggingDomain, sensorDomains, elasticCertsPath, kibanaPath):
+def createUpdateCertsSh(
+    loggingDomain, sensorDomains, sensorTpotUser, elasticCertsPath, kibanaPath
+):
     """Create updateCerts.sh file for logging server from
     configFiles/updateCerts.sh.template
 
     :loggingDomain: FQDN of logging server
     :sensorDomains: list of FQDNs or IP addresses of sensor servers
+    :sensorTpotUser: TODO
     :elasticCertsPath: path to elasticsearch SSL certificate directory
     :kibanaPath: path to kibana configuration directory
     :returns: path to newly-created updateCerts.sh file
@@ -88,6 +91,7 @@ def createUpdateCertsSh(loggingDomain, sensorDomains, elasticCertsPath, kibanaPa
         updatesh = f.read()
 
     updatesh = updatesh.replace("SENSOR_FQDNS_OR_IPS", " ".join(sensorDomains))
+    updatesh = updatesh.replace("SENSOR_TPOT_USER", sensorTpotUser)
     updatesh = updatesh.replace("LOGGING_FQDN_HERE", loggingDomain)
     updatesh = updatesh.replace("ELASTIC_CERTS_PATH", elasticCertsPath)
     updatesh = updatesh.replace("KIBANA_PATH", kibanaPath)

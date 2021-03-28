@@ -60,7 +60,6 @@ def installPackages(connection, packageList):
     connection.sudo(f"apt-get --yes install {packageStr}", hide=True)
 
 
-# def generateSSLCerts(connection, email, elasticCertsPath, kibanaCertsPath):
 def generateSSLCerts(localConn, email, loggingHost, apiTokenPath="digitalocean.ini"):
     """Generate SSL certificates on logging server using Certbot
 
@@ -82,7 +81,7 @@ def generateSSLCerts(localConn, email, loggingHost, apiTokenPath="digitalocean.i
     )
 
     # need to copy certs into temporary directory that doesn't need sudo access
-    # in order to later copy certs to other servers
+    # in order to later transfer certs to other servers
     tempCertDir = "certs"
     localConn.run(f"mkdir {tempCertDir}", hide="stdout")
     localConn.sudo(
@@ -92,26 +91,6 @@ def generateSSLCerts(localConn, email, loggingHost, apiTokenPath="digitalocean.i
 
     # this has to be deleted after files are transferred for security reasons
     return tempCertDir
-
-    # connection.sudo(f"mkdir {elasticCertsPath}", hide=True)
-    # connection.sudo(f"mkdir {kibanaCertsPath}", hide=True)
-
-    # connection.sudo(
-    #     f"certbot certonly --standalone -d {connection.host} --non-interactive"
-    #     f" --agree-tos --email {email}",
-    #     hide=True,
-    # )
-
-    # # tried to symlink these instead, but kept on getting permission errors in ES logs
-    # # must run sh -c for * glob pattern to be correctly interpreted by bash
-    # connection.sudo(
-    #     f"sh -c 'cp /etc/letsencrypt/live/{connection.host}/* {elasticCertsPath}/'",
-    #     hide=True,
-    # )
-    # connection.sudo(f"chmod 644 {elasticCertsPath}/privkey.pem", hide=True)
-
-    # # copying certificates isn't good but I couldn't get it to work with symlinks
-    # connection.sudo(f"sh -c 'cp {elasticCertsPath}/* {kibanaCertsPath}/'", hide=True)
 
 
 def transferSSLCerts(connection, certDir, loggingServer=True):
@@ -130,7 +109,9 @@ def transferSSLCerts(connection, certDir, loggingServer=True):
             connection.put(f"{certDir}/{file}", remote="certs/")
 
         connection.sudo("mv certs /etc/elasticsearch/", hide=True)
-        # may have to chown to elasticsearch after moving the certs, but idk
+        connection.sudo(
+            "chown -R root:elasticsearch /etc/elasticsearch/certs", hide=True
+        )
         connection.sudo("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide=True)
         connection.sudo("mkdir /etc/kibana/certs", hide=True)
         connection.sudo(

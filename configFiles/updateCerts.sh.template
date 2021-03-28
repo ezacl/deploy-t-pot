@@ -14,7 +14,7 @@ sensorArray=(SENSOR_FQDNS_OR_IPS)
 
 for sensor in "${sensorArray[@]}"
 do
-    ssh -o "StrictHostKeyChecking=no" -p 64295 root@$sensor systemctl stop tpot
+    ssh -o "StrictHostKeyChecking=no" -p 64295 SENSOR_TPOT_USER@$sensor systemctl stop tpot
 done
 
 echo "stopped T-Pot services on sensor servers"
@@ -32,7 +32,7 @@ cp -r /etc/elasticsearch/certs KIBANA_PATH/
 # copy SSL certificate to sensor servers
 for sensor in "${sensorArray[@]}"
 do
-    scp -o "StrictHostKeyChecking=no" -P 64295 ELASTIC_CERTS_PATH/fullchain.pem root@$sensor:/data/elk/fullchain.pem
+    scp -o "StrictHostKeyChecking=no" -P 64295 ELASTIC_CERTS_PATH/fullchain.pem SENSOR_TPOT_USER@$sensor:/data/elk/fullchain.pem
 done
 
 echo "transferred certificates to sensor servers"
@@ -44,7 +44,7 @@ echo "restarted elasticsearch and kibana on logging server"
 
 for sensor in "${sensorArray[@]}"
 do
-    ssh -o "StrictHostKeyChecking=no" -p 64295 root@$sensor systemctl start tpot
+    ssh -o "StrictHostKeyChecking=no" -p 64295 SENSOR_TPOT_USER@$sensor systemctl start tpot
 done
 
 echo "restarted T-Pot services on sensor servers"
