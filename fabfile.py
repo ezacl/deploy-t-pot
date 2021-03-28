@@ -120,7 +120,7 @@ def installConfigureElasticsearch(
         f" > {packagesKey}",
         hide="stdout",
     )
-    # install pubilc signing keys
+    # install public signing keys
     # this gives
     # "Warning: apt-key output should not be parsed (stdout is not a terminal)"
     # can add pty=True to suppress it, but should find a fundamentally better way
