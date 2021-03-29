@@ -108,15 +108,18 @@ def transferSSLCerts(connection, certDir, loggingServer=True):
         for file in os.listdir(certDir):
             connection.put(f"{certDir}/{file}", remote="certs/")
 
+        connection.sudo("rm -rf /etc/elasticsearch/certs", hide=True)
         connection.sudo("mv certs /etc/elasticsearch/", hide=True)
         connection.sudo(
             "chown -R root:elasticsearch /etc/elasticsearch/certs", hide=True
         )
         connection.sudo("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide=True)
-        connection.sudo("mkdir /etc/kibana/certs", hide=True)
-        connection.sudo(
-            "sh -c 'cp /etc/elasticsearch/certs/* /etc/kibana/certs/'", hide=True
-        )
+        # connection.sudo("mkdir /etc/kibana/certs", hide=True)
+        # connection.sudo(
+        #     "sh -c 'cp /etc/elasticsearch/certs/* /etc/kibana/certs/'", hide=True
+        # )
+        connection.sudo("rm -rf /etc/kibana/certs", hide=True)
+        connection.sudo("cp -r /etc/elasticsearch/certs /etc/kibana/", hide=True)
     else:
         # if need to transfer certs to sensor server
         connection.put(f"{certDir}/fullchain.pem")

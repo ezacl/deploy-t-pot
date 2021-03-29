@@ -336,7 +336,7 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
             deploymentCreds = credentials["deployment"]
             logCreds = credentials["logging"]
             sensorCreds = credentials["sensors"]
-            sudoUser = credentials["sudouser"]
+            tPotSudoUser = credentials["sudouser"]
     except FileNotFoundError:
         raise NoCredentialsFileError(
             f"{credsFile} not found. Did you copy credentials.json.template?"
@@ -362,13 +362,13 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     logger.info(f"Deployment: Added custom SSL renewal script to {renewHookPath}")
 
     if loggingServer:
-        createAllSudoUsers(sensorCreds, sudoUser, logCreds)
+        createAllSudoUsers(sensorCreds, tPotSudoUser, logCreds)
     else:
-        createAllSudoUsers(sensorCreds, sudoUser)
+        createAllSudoUsers(sensorCreds, tPotSudoUser)
 
     logConn = Connection(
         host=logCreds["host"],
-        user=sudoUser,
+        user=tPotSudoUser,
         config=Config(overrides={"sudo": {"password": logCreds["sudopass"]}}),
     )
 
@@ -387,7 +387,7 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     for index, sensor in enumerate(sensorCreds):
         sensorConn = Connection(
             host=sensor["host"],
-            user=sudoUser,
+            user=tPotSudoUser,
             config=Config(overrides={"sudo": {"password": sensor["sudopass"]}}),
         )
         installTPot(index + 1, sensorConn, tempCertPath)

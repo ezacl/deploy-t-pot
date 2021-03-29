@@ -5,6 +5,8 @@
 # should be run as a Certbot renew hook, such as by putting it in
 # /etc/letsencrypt/renewal-hooks/deploy
 
-echo "Renew script being run by user $(whoami)"
+echo "Renew script being run by $(whoami), switching to SUDO_USER_HERE"
 
-su - SUDO_USER_HERE -c 'echo "Switched to user $(whoami)"; cd DEPLOYMENT_SCRIPTS_PATH; python3 updateCerts.py'
+# python renewal script needs to be run as non-root user for pip dependencies
+# and SSH keys to be found
+runuser -u SUDO_USER_HERE python3 DEPLOYMENT_SCRIPTS_PATH/updateCerts.py DEPLOYMENT_SCRIPTS_PATH

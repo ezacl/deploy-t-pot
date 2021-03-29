@@ -1,4 +1,6 @@
 import json
+import os
+import sys
 
 from fabric import Config, Connection
 from invoke.config import Config as InvokeConfig
@@ -8,6 +10,9 @@ from deploymentHelpers import transferSSLCerts
 
 # Fabric script to automatically handle SSL certificate renewal with ELK services
 # check logs at /var/log/letsencrypt/letsencrypt.log for debugging
+
+# change working directory to command-line argument to be able to find config files
+os.chdir(sys.argv[1])
 
 credsFile = "credentials.json"
 
@@ -20,7 +25,6 @@ with open(credsFile) as f:
 loggingHost = logCreds["host"]
 sudoUser = credentials["sudouser"]
 
-# can I assume that the deployment server sudo user will run this? Won't it be root? TODO
 deploymentConf = InvokeConfig()
 deploymentConf.sudo.password = deploymentCreds["sudopass"]
 deploymentConn = Context(config=deploymentConf)
