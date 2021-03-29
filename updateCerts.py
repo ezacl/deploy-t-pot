@@ -6,11 +6,10 @@ from invoke.context import Context
 
 from deploymentHelpers import transferSSLCerts
 
-# WRITE A BASH WRAPPER TO RUN THIS BUT MAKE SURE IT CDS INTO THIS DIRECTORY FIRST TODO
+# Fabric script to automatically handle SSL certificate renewal with ELK services
+# check logs at /var/log/letsencrypt/letsencrypt.log for debugging
 
 credsFile = "credentials.json"
-# don't hardcode this TODO
-sudoUser = "tpotadmin"
 
 with open(credsFile) as f:
     credentials = json.load(f)
@@ -19,6 +18,7 @@ with open(credsFile) as f:
     sensorCreds = credentials["sensors"]
 
 loggingHost = logCreds["host"]
+sudoUser = credentials["sudouser"]
 
 # can I assume that the deployment server sudo user will run this? Won't it be root? TODO
 deploymentConf = InvokeConfig()
@@ -66,16 +66,16 @@ transferSSLCerts(logConn, tempCertPath)
 
 print("Transferred SSL certificates to logging server")
 
-for conn in sensorConns:
-    transferSSLCerts(conn, tempCertPath, loggingServer=False)
-    conn.sudo("systemctl start tpot", hide=True)
-
-print("Transferred SSL certificates to all sensor servers")
-
 logConn.sudo("systemctl start elasticsearch.service", hide=True)
 logConn.sudo("systemctl start kibana.service", hide=True)
 
 print("Restarted elasticsearch and kibana on logging server")
+
+for conn in sensorConns:
+    transferSSLCerts(conn, tempCertPath, loggingServer=False)
+    conn.sudo("systemctl start tpot", hide=True)
+
+print("Transferred SSL certificates to all sensor servers and restarted T-Pot")
 
 logConn.close()
 for conn in sensorConns:

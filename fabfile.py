@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import shutil
 import sys
 import time
@@ -11,7 +12,7 @@ from invoke.context import Context
 from invoke.exceptions import UnexpectedExit
 
 from configFuncs import (createElasticsearchYml, createKibanaYml,
-                         createLogstashConf)
+                         createLogstashConf, createUpdateCertsSh)
 from deploymentHelpers import (createSudoUser, createTPotUser,
                                generateSSLCerts, importKibanaObjects,
                                installPackages, setupCurator, transferSSLCerts)
@@ -296,16 +297,15 @@ def configureLoggingServer(connection, sensorDomains, localCertDir):
     )
 
 
-def createAllSudoUsers(sensorObjects, loggingObject=None):
+def createAllSudoUsers(sensorObjects, sudoUser, loggingObject=None):
     """Create non-root sudo users on all servers in network
 
     :sensorObjects: list of sensor server dictionaries from credentials.json
+    :sudoUser: TODO
     :loggingObject: optional, logging server dictionary from credentials.json
     :returns: name of user created on all servers
 
     """
-    deploymentUser = "tpotadmin"
-
     objsList = (
         [loggingObject] + sensorObjects if loggingObject is not None else sensorObjects
     )
@@ -313,12 +313,10 @@ def createAllSudoUsers(sensorObjects, loggingObject=None):
     for creds in objsList:
         host = creds["host"]
         conn = Connection(host=host, user="root")
-        createSudoUser(conn, deploymentUser, creds["sudopass"])
+        createSudoUser(conn, sudoUser, creds["sudopass"])
         conn.close()
 
-        logger.info(f"Created non-root sudo user {deploymentUser}@{host}")
-
-    return deploymentUser
+        logger.info(f"Created non-root sudo user {sudoUser}@{host}")
 
 
 def deployNetwork(loggingServer=True, credsFile="credentials.json"):
@@ -338,6 +336,7 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
             deploymentCreds = credentials["deployment"]
             logCreds = credentials["logging"]
             sensorCreds = credentials["sensors"]
+            sudoUser = credentials["sudouser"]
     except FileNotFoundError:
         raise NoCredentialsFileError(
             f"{credsFile} not found. Did you copy credentials.json.template?"
@@ -351,10 +350,17 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     )
     logger.info("Deployment: created Let's Encrypt SSL certificates")
 
+    # os.getcwd() won't work if this script is run from outside of directory TODO?
+    certsWrapperPath = createUpdateCertsSh(os.getcwd())
+    renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
+    deploymentConn.sudo(f"cp {certsWrapperPath} {renewHookPath}", hide=True)
+    deploymentConn.sudo(f"chmod +x {renewHookPath}", hide=True)
+    logger.info(f"Logger: Added custom SSL renewal script to {renewHookPath}")
+
     if loggingServer:
-        sudoUser = createAllSudoUsers(sensorCreds, logCreds)
+        createAllSudoUsers(sensorCreds, sudoUser, logCreds)
     else:
-        sudoUser = createAllSudoUsers(sensorCreds)
+        createAllSudoUsers(sensorCreds, sudoUser)
 
     logConn = Connection(
         host=logCreds["host"],

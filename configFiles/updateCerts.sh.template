@@ -1,50 +1,11 @@
 #!/bin/bash
 
-# script to automatically handle SSL certificate renewal with ELK services
+# bash wrapper for Fabric script to transfer all renewed SSL certificates
 
 # should be run as a Certbot renew hook, such as by putting it in
 # /etc/letsencrypt/renewal-hooks/deploy
 
-# check logs at /var/log/letsencrypt/letsencrypt.log for debugging, especially regarding
-# user running this script (must have enough privileges to start/stop ELK services)
-
 echo "Renew script being run by user $(whoami)"
 
-sensorArray=(SENSOR_FQDNS_OR_IPS)
-
-for sensor in "${sensorArray[@]}"
-do
-    ssh -o "StrictHostKeyChecking=no" -p 64295 SENSOR_TPOT_USER@$sensor systemctl stop tpot
-done
-
-echo "stopped T-Pot services on sensor servers"
-
-systemctl stop kibana.service
-systemctl stop elasticsearch.service
-
-echo "stopped elasticsearch and kibana on logging server"
-
-# copy certificates to elasticsearch and kibana config directories
-cp /etc/letsencrypt/live/LOGGING_FQDN_HERE/* ELASTIC_CERTS_PATH/
-chmod 644 ELASTIC_CERTS_PATH/privkey.pem
-cp -r /etc/elasticsearch/certs KIBANA_PATH/
-
-# copy SSL certificate to sensor servers
-for sensor in "${sensorArray[@]}"
-do
-    scp -o "StrictHostKeyChecking=no" -P 64295 ELASTIC_CERTS_PATH/fullchain.pem SENSOR_TPOT_USER@$sensor:/data/elk/fullchain.pem
-done
-
-echo "transferred certificates to sensor servers"
-
-systemctl start elasticsearch.service
-systemctl start kibana.service
-
-echo "restarted elasticsearch and kibana on logging server"
-
-for sensor in "${sensorArray[@]}"
-do
-    ssh -o "StrictHostKeyChecking=no" -p 64295 SENSOR_TPOT_USER@$sensor systemctl start tpot
-done
-
-echo "restarted T-Pot services on sensor servers"
+cd DEPLOYMENT_SCRIPTS_PATH
+python3 updateCerts.py

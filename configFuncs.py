@@ -73,9 +73,10 @@ def createLogstashConf(domainName, certPath, user, password):
         f.write(logConf)
 
 
-def createUpdateCertsSh(
-    loggingDomain, sensorDomains, sensorTpotUser, elasticCertsPath, kibanaPath
-):
+# def createUpdateCertsSh(
+#     loggingDomain, sensorDomains, sensorTpotUser, elasticCertsPath, kibanaPath
+# ): this whole thing is a TODO
+def createUpdateCertsSh(projectPath):
     """Create updateCerts.sh file for logging server from
     configFiles/updateCerts.sh.template
 
@@ -90,11 +91,12 @@ def createUpdateCertsSh(
     with open("configFiles/updateCerts.sh.template") as f:
         updatesh = f.read()
 
-    updatesh = updatesh.replace("SENSOR_FQDNS_OR_IPS", " ".join(sensorDomains))
-    updatesh = updatesh.replace("SENSOR_TPOT_USER", sensorTpotUser)
-    updatesh = updatesh.replace("LOGGING_FQDN_HERE", loggingDomain)
-    updatesh = updatesh.replace("ELASTIC_CERTS_PATH", elasticCertsPath)
-    updatesh = updatesh.replace("KIBANA_PATH", kibanaPath)
+    # updatesh = updatesh.replace("SENSOR_FQDNS_OR_IPS", " ".join(sensorDomains))
+    # updatesh = updatesh.replace("SENSOR_TPOT_USER", sensorTpotUser)
+    # updatesh = updatesh.replace("LOGGING_FQDN_HERE", loggingDomain)
+    # updatesh = updatesh.replace("ELASTIC_CERTS_PATH", elasticCertsPath)
+    # updatesh = updatesh.replace("KIBANA_PATH", kibanaPath)
+    updatesh = updatesh.replace("DEPLOYMENT_SCRIPTS_PATH", projectPath)
 
     destFile = "configFiles/updateCerts.sh"
 
