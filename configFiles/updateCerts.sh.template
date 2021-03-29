@@ -7,5 +7,4 @@
 
 echo "Renew script being run by user $(whoami)"
 
-cd DEPLOYMENT_SCRIPTS_PATH
-python3 updateCerts.py
+su - SUDO_USER_HERE -c 'echo "Switched to user $(whoami)"; cd DEPLOYMENT_SCRIPTS_PATH; python3 updateCerts.py'

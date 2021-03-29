@@ -346,16 +346,20 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
     deploymentConf.sudo.password = deploymentCreds["sudopass"]
     deploymentConn = Context(config=deploymentConf)
     tempCertPath = generateSSLCerts(
-        deploymentConn, deploymentCreds["email"], logCreds["host"]
+        deploymentConn,
+        deploymentCreds["email"],
+        logCreds["host"],
+        apiTokenPath=f"{os.getcwd()}/digitalocean.ini",
     )
     logger.info("Deployment: created Let's Encrypt SSL certificates")
 
     # os.getcwd() won't work if this script is run from outside of directory TODO?
-    certsWrapperPath = createUpdateCertsSh(os.getcwd())
+    sudoUser = deploymentConn.run("whoami", hide="stdout").stdout.strip()
+    certsWrapperPath = createUpdateCertsSh(os.getcwd(), sudoUser)
     renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
     deploymentConn.sudo(f"cp {certsWrapperPath} {renewHookPath}", hide=True)
-    deploymentConn.sudo(f"chmod +x {renewHookPath}", hide=True)
-    logger.info(f"Logger: Added custom SSL renewal script to {renewHookPath}")
+    deploymentConn.sudo(f"chmod u+x {renewHookPath}", hide=True)
+    logger.info(f"Deployment: Added custom SSL renewal script to {renewHookPath}")
 
     if loggingServer:
         createAllSudoUsers(sensorCreds, sudoUser, logCreds)
@@ -379,7 +383,7 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
 
     logConn.close()
 
-    # set up all sensor servers (make this async soon?)
+    # set up all sensor servers (make this async?)
     for index, sensor in enumerate(sensorCreds):
         sensorConn = Connection(
             host=sensor["host"],
