@@ -73,30 +73,18 @@ def createLogstashConf(domainName, certPath, user, password):
         f.write(logConf)
 
 
-# def createUpdateCertsSh(
-#     loggingDomain, sensorDomains, sensorTpotUser, elasticCertsPath, kibanaPath
-# ): this whole thing is a TODO
 def createUpdateCertsSh(projectPath, sudoUser):
-    """Create updateCerts.sh file for logging server from
+    """Create updateCerts.sh file for deployment server from
     configFiles/updateCerts.sh.template
 
-    :loggingDomain: FQDN of logging server
-    :sensorDomains: list of FQDNs or IP addresses of sensor servers
-    :sensorTpotUser: TODO
-    :elasticCertsPath: path to elasticsearch SSL certificate directory
-    :sudoUser: TODO
-    :kibanaPath: path to kibana configuration directory
+    :projectPath: path to directory holding fabric scripts (dirty workaround)
+    :sudoUser: name of non-roon sudo user running whole deployment
     :returns: path to newly-created updateCerts.sh file
 
     """
     with open("configFiles/updateCerts.sh.template") as f:
         updatesh = f.read()
 
-    # updatesh = updatesh.replace("SENSOR_FQDNS_OR_IPS", " ".join(sensorDomains))
-    # updatesh = updatesh.replace("SENSOR_TPOT_USER", sensorTpotUser)
-    # updatesh = updatesh.replace("LOGGING_FQDN_HERE", loggingDomain)
-    # updatesh = updatesh.replace("ELASTIC_CERTS_PATH", elasticCertsPath)
-    # updatesh = updatesh.replace("KIBANA_PATH", kibanaPath)
     updatesh = updatesh.replace("SUDO_USER_HERE", sudoUser)
     updatesh = updatesh.replace("DEPLOYMENT_SCRIPTS_PATH", projectPath)
 

@@ -16,6 +16,12 @@ os.chdir(sys.argv[1])
 
 credsFile = "credentials.json"
 
+elasticPath = "/etc/elasticsearch"
+elasticCertsPath = f"{elasticPath}/certs"
+kibanaPath = "/etc/kibana"
+kibanaCertsPath = f"{kibanaPath}/certs"
+dataPath = "/data/elk"
+
 with open(credsFile) as f:
     credentials = json.load(f)
     deploymentCreds = credentials["deployment"]
@@ -66,7 +72,16 @@ logConn.sudo("systemctl stop elasticsearch.service", hide=True)
 
 print("Stopped kibana and elasticsearch on logging server")
 
-transferSSLCerts(logConn, tempCertPath)
+transferSSLCerts(
+    logConn,
+    tempCertPath,
+    loggingServer=True,
+    elasticPath=elasticPath,
+    elasticCertsPath=elasticCertsPath,
+    kibanaPath=kibanaPath,
+    kibanaCertsPath=kibanaCertsPath,
+)
+
 
 print("Transferred SSL certificates to logging server")
 
@@ -76,7 +91,7 @@ logConn.sudo("systemctl start kibana.service", hide=True)
 print("Restarted elasticsearch and kibana on logging server")
 
 for conn in sensorConns:
-    transferSSLCerts(conn, tempCertPath, loggingServer=False)
+    transferSSLCerts(conn, tempCertPath, loggingServer=False, dataPath=dataPath)
     conn.sudo("systemctl start tpot", hide=True)
 
 print("Transferred SSL certificates to all sensor servers and restarted T-Pot")

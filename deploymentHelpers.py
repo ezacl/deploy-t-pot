@@ -60,14 +60,14 @@ def installPackages(connection, packageList):
     connection.sudo(f"apt-get --yes install {packageStr}", hide=True)
 
 
-def generateSSLCerts(localConn, email, loggingHost, apiTokenPath="digitalocean.ini"):
+def generateSSLCerts(localConn, email, loggingHost, apiTokenPath):
     """Generate SSL certificates on logging server using Certbot
 
-    :connection: fabric.Connection object to deployment server
+    :localConn: fabric.Connection object to deployment server
     :email: email address to receive Certbot notifications
-    :elasticCertsPath: path to elasticsearch SSL certificate directory
-    :kibanaCertsPath: path to kibana SSL certificate directory
-    :returns: None
+    :loggingHost: domain name for logging server
+    :apiTokenPath: path to digitalocean API key ini file
+    :returns: path to temporary directory holding SSL certificates
 
     """
     certbotPackages = ["certbot", "python3-certbot-dns-digitalocean"]
@@ -93,13 +93,31 @@ def generateSSLCerts(localConn, email, loggingHost, apiTokenPath="digitalocean.i
     return tempCertDir
 
 
-def transferSSLCerts(connection, certDir, loggingServer=True):
-    """TODO: Docstring for transferSSLCerts.
+def transferSSLCerts(
+    connection,
+    certDir,
+    loggingServer=True,
+    elasticPath=None,
+    elasticCertsPath=None,
+    kibanaPath=None,
+    kibanaCertsPath=None,
+    dataPath=None,
+):
+    """Transfer SSL certificates to either logging or sensor server
 
-    :connection: TODO
-    :certDir: TODO
-    :loggingServer: TODO
-    :returns: TODO
+    :connection: fabric.Connection object to logging or sensor server
+    :certDir: path to temporary directory containing SSL certificates
+    :loggingServer: optional, whether transferring SSL certificates to the logging
+    server or to a sensor server. Defaults to True
+    :elasticPath: optional, path to elasticsearch configuration directory
+    (logging server)
+    :elasticCertsPath: optional, path to elasticsearch SSL certificate
+    directory (logging server)
+    :kibanaPath: optional, path to kibana configuration directory (logging server)
+    :kibanaCertsPath: optional, path to kibana SSL certificate directory
+    (logging server)
+    :dataPath: optional, path to elk data directory (sensor server)
+    :returns: None
 
     """
     if loggingServer:
@@ -108,22 +126,16 @@ def transferSSLCerts(connection, certDir, loggingServer=True):
         for file in os.listdir(certDir):
             connection.put(f"{certDir}/{file}", remote="certs/")
 
-        connection.sudo("rm -rf /etc/elasticsearch/certs", hide=True)
-        connection.sudo("mv certs /etc/elasticsearch/", hide=True)
-        connection.sudo(
-            "chown -R root:elasticsearch /etc/elasticsearch/certs", hide=True
-        )
-        connection.sudo("chmod 644 /etc/elasticsearch/certs/privkey.pem", hide=True)
-        # connection.sudo("mkdir /etc/kibana/certs", hide=True)
-        # connection.sudo(
-        #     "sh -c 'cp /etc/elasticsearch/certs/* /etc/kibana/certs/'", hide=True
-        # )
-        connection.sudo("rm -rf /etc/kibana/certs", hide=True)
-        connection.sudo("cp -r /etc/elasticsearch/certs /etc/kibana/", hide=True)
+        connection.sudo(f"rm -rf {elasticCertsPath}", hide=True)
+        connection.sudo(f"mv certs {elasticPath}/", hide=True)
+        connection.sudo(f"chown -R root:elasticsearch {elasticCertsPath}", hide=True)
+        connection.sudo(f"chmod 644 {elasticCertsPath}/privkey.pem", hide=True)
+        connection.sudo(f"rm -rf {kibanaCertsPath}", hide=True)
+        connection.sudo(f"cp -r {elasticCertsPath} {kibanaPath}/", hide=True)
     else:
         # if need to transfer certs to sensor server
         connection.put(f"{certDir}/fullchain.pem")
-        connection.sudo("mv fullchain.pem /data/elk/", hide=True)
+        connection.sudo(f"mv fullchain.pem {dataPath}/", hide=True)
 
 
 def setupCurator(connection, configPath, elasticPass):
