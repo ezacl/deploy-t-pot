@@ -284,7 +284,7 @@ def configureLoggingServer(connection, localCertDir):
     with open("passwords.txt", "a") as f:
         f.write(
             f"\n\nChanged password for user {tPotUser}"
-            f"\nPASSWORD {tPotUser} = {tPotPass}"
+            f"\nPASSWORD {tPotUser} = {tPotPass}\n"
         )
 
     # block until kibana service (port 5601) is ready
@@ -331,7 +331,8 @@ def deployNetwork(
     True. Set to False if you already have deployed a logging server and want to
     only add sensor server(s)
     :credsFile: optional, path to credentials JSON file. Defaults to credentials.json
-    :DOApiKeyFile: TODO
+    :DOApiKeyFile: optional, path to file containing DigitalOcean API key. Defaults to
+    digitalocean.ini
     :returns: None
 
     """
@@ -355,11 +356,13 @@ def deployNetwork(
     deploymentConf.sudo.password = deploymentCreds["sudopass"]
     deploymentConn = Context(config=deploymentConf)
 
+    # generate SSH keys to log into network servers
     deploymentConn.run(
         "ssh-keygen -f ~/.ssh/id_rsa -t rsa -b 4096 -N ''", hide="stdout"
     )
     logger.info("Deployment: generated SSH keys for network servers")
     sshKey = deploymentConn.run("cat ~/.ssh/id_rsa.pub", hide="stdout").stdout.strip()
+    # create all network servers specified in credentials.json
     createAllVMs(apiKey, logCreds, sensorCreds, sshKey)
     logger.info("Deployment: Created all network servers through DigitalOcean API")
 
@@ -369,7 +372,10 @@ def deployNetwork(
         logCreds["host"],
         f"{os.getcwd()}/{DOApiKeyFile}",
     )
-    logger.info("Deployment: created Let's Encrypt SSL certificates")
+    logger.info(
+        "Deployment: created Let's Encrypt SSL certificates and made temporary"
+        f"SSL certificate directory {tempCertPath}"
+    )
 
     sudoUser = deploymentConn.run("whoami", hide="stdout").stdout.strip()
     certsWrapperPath = createUpdateCertsSh(os.getcwd(), sudoUser)
@@ -410,6 +416,7 @@ def deployNetwork(
     deploymentConn.run("chmod 600 passwords.txt credentials.json")
     # remove temporarily copied SSL certs from generateSSLCerts
     deploymentConn.run(f"rm -rf {tempCertPath}", hide="stdout")
+    logger.info(f"Removed temporary SSL certificate directory {tempCertPath}")
 
 
 if __name__ == "__main__":

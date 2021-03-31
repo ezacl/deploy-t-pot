@@ -4,12 +4,12 @@ import requests
 
 
 def addSSHKey(apiToken, keyName, keyContent):
-    """TODO: Docstring for addSSHKey.
+    """Add SSH public key to DigitalOcean account and return its ID
 
-    :apiToken: TODO
-    :keyName: TODO
-    :keyContent: TODO
-    :returns: TODO
+    :apiToken: DigitalOcean API key
+    :keyName: Name chosen for SSH key
+    :keyContent: content of the public key (copy and paste the .pub file)
+    :returns: the SSH key's ID for future use
 
     """
     endpoint = "https://api.digitalocean.com/v2/account/keys"
@@ -25,13 +25,15 @@ def addSSHKey(apiToken, keyName, keyContent):
 
 
 def createARecord(apiToken, subDomain, domainName, ipAddress):
-    """TODO: Docstring for createARecord.
+    """Create DNS A record connection a specific domain name to an IP address
 
-    :apiToken: TODO
-    :subDomain: TODO
-    :domainName: TODO
-    :ipAddress: TODO
-    :returns: TODO
+    :apiToken: DigitalOcean API key
+    :subDomain: subdomain for A record (if FQDN is subdomain.domain.com, this is
+    subdomain)
+    :domainName: top-level domain for A record (if FQDN is subdomain.domain.com, this
+    is domain)
+    :ipAddress: IP address for A record
+    :returns: None
 
     """
     endpoint = f"https://api.digitalocean.com/v2/domains/{domainName}/records"
@@ -42,11 +44,12 @@ def createARecord(apiToken, subDomain, domainName, ipAddress):
 
 
 def waitForVM(apiToken, dropletId):
-    """TODO: Docstring for waitForVM.
+    """Block until DigitalOcean droplet (created by createVM) is up and running (until
+    it has an IP address associated to it)
 
-    :apiToken: TODO
-    :dropletId: TODO
-    :returns: TODO
+    :apiToken: DigitalOcean API key
+    :dropletId: ID of droplet
+    :returns: None
 
     """
     endpoint = f"https://api.digitalocean.com/v2/droplets/{dropletId}"
@@ -64,15 +67,15 @@ def waitForVM(apiToken, dropletId):
 
 
 def createVM(apiToken, name, domainName, region, sshKeyId, loggerSize=False):
-    """TODO: Docstring for createVM.
+    """Create DigitalOcean droplet with associated DNS A record
 
-    :apiToken: TODO
-    :name: TODO
-    :domainName: TODO
-    :region: TODO
-    :sshKeyId: TODO
-    :loggerSize: TODO
-    :returns: TODO
+    :apiToken: DigitalOcean API key
+    :name: chosen name for droplet and subdomain for DNS record
+    :domainName: top-level domain name for DNS record
+    :region: chosen region for droplet (such as "nyc1", etc.)
+    :sshKeyId: ID of SSH key to add to droplet (returned by addSSHKey)
+    :loggerSize: size slug of droplet (such as "s-4vcpu-8gb", etc.)
+    :returns: None
 
     """
     endpoint = "https://api.digitalocean.com/v2/droplets"
@@ -97,26 +100,54 @@ def createVM(apiToken, name, domainName, region, sshKeyId, loggerSize=False):
     createARecord(apiToken, name, domainName, ipAddress)
 
 
-def createAllVMs(apiToken, loggingObj, sensorObjs, sshKey):
-    """TODO: Docstring for createAllVMs.
+def chooseRegion(apiToken, defaultRegion):
+    """Return most frequent previous droplet region to use for network servers
 
-    :apiToken: TODO
-    :loggingObj: TODO
-    :sensorObjs: TODO
-    :sshKey: TODO
-    :returns: TODO
+    :apiToken: DigitalOcean API key
+    :defaultRegion: Region to fall back to if no currently active droplets
+    :returns: most frequent droplet region slug used for all current droplets
+
+    """
+    endpoint = "https://api.digitalocean.com/v2/droplets"
+    headers = {"Authorization": f"Bearer {apiToken}"}
+    dropletReq = requests.get(endpoint, headers=headers)
+    dropletReq.raise_for_status()
+    jsonResp = dropletReq.json()
+
+    regionList = [droplet["region"]["slug"] for droplet in jsonResp["droplets"]]
+
+    # return most frequent element in regionList, else defaultRegion if regionList is
+    # empty
+    try:
+        return max(set(regionList), key=regionList.count)
+    except ValueError:
+        return defaultRegion
+
+
+def createAllVMs(apiToken, loggingObj, sensorObjs, sshKey):
+    """Create multiple DigitalOcean droplets from JSON objects in credentials.json
+
+    :apiToken: DigitalOcean API key
+    :loggingObj: JSON object representing logging server
+    :sensorObjs: array of JSON objects representing sensor servers
+    :sshKey: contents of SSH public key to add to each server
+    :returns: None
 
     """
     sshKeyName = "T-Pot deployment server"
     sshKeyId = addSSHKey(apiToken, sshKeyName, sshKey)
 
     defaultRegion = "nyc1"
+    region = chooseRegion(apiToken, defaultRegion)
 
-    subDomain = ".".join(loggingObj["host"].split(".")[:-2])
-    domainName = ".".join(loggingObj["host"].split(".")[-2:])
-    createVM(apiToken, subDomain, domainName, defaultRegion, sshKeyId, loggerSize=True)
+    def splitDomain(domainStr):
+        """Split an FQDN as a string into its domain and subdomain"""
+        splitStr = domainStr.split(".")
+        return ".".join(splitStr[:-2]), ".".join(splitStr[-2:])
+
+    subDomain, domainName = splitDomain(loggingObj["host"])
+    createVM(apiToken, subDomain, domainName, region, sshKeyId, loggerSize=True)
 
     for sensor in sensorObjs:
-        subDomain = ".".join(sensor["host"].split(".")[:-2])
-        domainName = ".".join(sensor["host"].split(".")[-2:])
-        createVM(apiToken, subDomain, domainName, defaultRegion, sshKeyId)
+        subDomain, domainName = splitDomain(sensor["host"])
+        createVM(apiToken, subDomain, domainName, region, sshKeyId)
