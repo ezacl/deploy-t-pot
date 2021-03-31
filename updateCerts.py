@@ -40,7 +40,6 @@ deploymentConn.run(f"mkdir {tempCertPath}", hide="stdout")
 deploymentConn.sudo(
     f"sh -c 'cp /etc/letsencrypt/live/{loggingHost}/* {tempCertPath}/'", hide=True
 )
-# is this necessary? TODO
 deploymentConn.sudo(f"chmod +r {tempCertPath}/privkey.pem", hide=True)
 
 # can log to stdout because certbot saves logs from it

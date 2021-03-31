@@ -9,5 +9,6 @@ logstash.conf
 credentials.json
 updateCerts.sh
 sudoTest.py
+apiTests.py
 
 venv

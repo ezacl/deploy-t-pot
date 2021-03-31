@@ -17,6 +17,7 @@ from deploymentHelpers import (createSudoUser, createTPotUser,
                                installPackages, setupCurator, transferSSLCerts)
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
+from vmManagement import createAllVMs
 
 logFile = "deployment.log"
 
@@ -321,13 +322,16 @@ def createAllSudoUsers(sensorObjects, sudoUser, loggingObject=None):
         logger.info(f"Created non-root sudo user {sudoUser}@{host}")
 
 
-def deployNetwork(loggingServer=True, credsFile="credentials.json"):
+def deployNetwork(
+    loggingServer=True, credsFile="credentials.json", DOApiKeyFile="digitalocean.ini"
+):
     """Set up entire distributed T-Pot network with logging and sensor servers
 
     :loggingServer: optional, whether to set up central logging server. Defaults to
     True. Set to False if you already have deployed a logging server and want to
     only add sensor server(s)
     :credsFile: optional, path to credentials JSON file. Defaults to credentials.json
+    :DOApiKeyFile: TODO
     :returns: None
 
     """
@@ -344,18 +348,29 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
 
+    with open(DOApiKeyFile) as f:
+        apiKey = f.read().strip().split()[-1]
+
     deploymentConf = InvokeConfig()
     deploymentConf.sudo.password = deploymentCreds["sudopass"]
     deploymentConn = Context(config=deploymentConf)
+
+    deploymentConn.run(
+        "ssh-keygen -f ~/.ssh/id_rsa -t rsa -b 4096 -N ''", hide="stdout"
+    )
+    logger.info("Deployment: generated SSH keys for network servers")
+    sshKey = deploymentConn.run("cat ~/.ssh/id_rsa.pub", hide="stdout").stdout.strip()
+    createAllVMs(apiKey, logCreds, sensorCreds, sshKey)
+    logger.info("Deployment: Created all network servers through DigitalOcean API")
+
     tempCertPath = generateSSLCerts(
         deploymentConn,
         deploymentCreds["email"],
         logCreds["host"],
-        f"{os.getcwd()}/digitalocean.ini",
+        f"{os.getcwd()}/{DOApiKeyFile}",
     )
     logger.info("Deployment: created Let's Encrypt SSL certificates")
 
-    # os.getcwd() won't work if this script is run from outside of directory TODO?
     sudoUser = deploymentConn.run("whoami", hide="stdout").stdout.strip()
     certsWrapperPath = createUpdateCertsSh(os.getcwd(), sudoUser)
     renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
