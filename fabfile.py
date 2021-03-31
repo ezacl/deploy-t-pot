@@ -6,15 +6,18 @@ import time
 
 from fabric import Config, Connection
 from invoke import Responder
+from invoke.config import Config as InvokeConfig
+from invoke.context import Context
 from invoke.exceptions import UnexpectedExit
 
 from configFuncs import (createElasticsearchYml, createKibanaYml,
                          createLogstashConf, createUpdateCertsSh)
 from deploymentHelpers import (createSudoUser, createTPotUser,
                                generateSSLCerts, importKibanaObjects,
-                               installPackages, setupCurator)
+                               installPackages, setupCurator, transferSSLCerts)
 from errors import BadAPIRequestError, NoCredentialsFileError
 from utils import findPassword, waitForService
+from vmManagement import createAllVMs
 
 logFile = "deployment.log"
 
@@ -28,77 +31,71 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
-def installTPot(number, sensorConn):
+def installTPot(number, connection, certDir):
     """Install custom T-Pot Sensor type on connection server
 
     :number: index of sensor in deployNetwork for loop (for logging purposes)
-    :sensorConn: fabric.Connection object with connection to sensor server (4 GB RAM)
+    :connection: fabric.Connection object with connection to sensor server (4 GB RAM)
+    :certDir: path to temporary directory containing SSL certificates
     :returns: None
 
     """
     packages = ["git"]
-    installPackages(sensorConn, packages)
+    installPackages(connection, packages)
     logger.info(f"Sensor {number}: Updated packages and installed git")
 
     # copy vimrc over for convenience
-    sensorConn.put("configFiles/.vimrc")
-    sensorConn.sudo("cp .vimrc /root/", hide=True)
-
-    # copy SSH public key to sensor server to transfer files from logging server
-    # (directly transferring it to .ssh/authorized_keys will overwrite previous ones)
-    tempPubKey = ".ssh/logging_pubkey"
-    sensorConn.put("id_rsa.pub", remote=tempPubKey)
-    sensorConn.run(f"cat {tempPubKey} >> .ssh/authorized_keys")
-    sensorConn.run(f"rm {tempPubKey}")
+    connection.put("configFiles/.vimrc")
+    connection.sudo("cp .vimrc /root/", hide=True)
 
     tPotPath = "/opt/tpot"
 
     # must clone into /opt/tpot/ because of altered install.sh script
-    sensorConn.sudo(
+    connection.sudo(
         f"git clone https://github.com/ezacl/tpotce-light {tPotPath}", hide=True
     )
     logger.info(f"Sensor {number}: Cloned T-Pot into {tPotPath}")
 
     # can add hide="stdout" as always but good to see real time output of
     # T-Pot installation
-    sensorConn.sudo(
+    connection.sudo(
         f"{tPotPath}/iso/installer/install.sh --type=auto"
         f" --conf={tPotPath}/iso/installer/tpot.conf"
     )
     logger.info(f"Sensor {number}: Installed T-Pot on sensor server")
 
-    dataPath = "/data/elk/"
+    dataPath = "/data/elk"
 
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
-    sensorConn.put("configFiles/logstash.conf")
-    sensorConn.sudo(f"mv logstash.conf {dataPath}", hide=True)
+    connection.put("configFiles/logstash.conf")
+    connection.sudo(f"mv logstash.conf {dataPath}/", hide=True)
 
-    # copy SSL certificate over (copied to local machine in deployNetwork)
-    sensorConn.put("fullchain.pem")
-    sensorConn.sudo(f"mv fullchain.pem {dataPath}", hide=True)
-    logger.info(f"Sensor {number}: Copied certificate from logging server")
+    # copy SSL certificate over to sensor server
+    transferSSLCerts(connection, certDir, loggingServer=False, dataPath=dataPath)
+    logger.info(f"Sensor {number}: Copied SSL certificate from deployment server")
 
     # rebooting server always throws an exception, so ignore
     try:
-        sensorConn.sudo("reboot", hide=True)
+        connection.sudo("reboot", hide=True)
     except UnexpectedExit:
         logger.info(f"Sensor {number}: Installed T-Pot and rebooted sensor server")
 
 
 def installConfigureElasticsearch(
-    conn, email, elasticPath, elasticCertsPath, kibanaCertsPath
+    conn, elasticPath, elasticCertsPath, kibanaPath, kibanaCertsPath, localCertDir
 ):
     """Install ELK stack and configure Elasticsearch on logging server
 
     :conn: fabric.Connection object with connection to logging server (8 GB RAM)
-    :email: email address to receive Certbot notifications
     :elasticPath: path to elasticsearch configuration directory
     :elasticCertsPath: path to elasticsearch SSL certificate directory
+    :kibanaPath: path to kibana configuration directory
     :kibanaCertsPath: path to kibana SSL certificate directory
+    :localCertDir: path to temporary directory containing SSL certificates
     :returns: None
 
     """
-    elkDeps = ["gnupg", "apt-transport-https", "certbot"]
+    elkDeps = ["gnupg", "apt-transport-https"]
     installPackages(conn, elkDeps)
 
     # copy vimrc over for convenience
@@ -145,10 +142,20 @@ def installConfigureElasticsearch(
     installPackages(conn, elkStack)
     logger.info("Logger: Installed elasticsearch, kibana, and elasticsearch-curator")
 
-    generateSSLCerts(conn, email, elasticCertsPath, kibanaCertsPath)
+    # transfer SSL certificates to loging server and put them in elasticsearch
+    # and kibana config directories
+    transferSSLCerts(
+        conn,
+        localCertDir,
+        loggingServer=True,
+        elasticPath=elasticPath,
+        elasticCertsPath=elasticCertsPath,
+        kibanaPath=kibanaPath,
+        kibanaCertsPath=kibanaCertsPath,
+    )
 
     logger.info(
-        "Logger: Generated SSL certificates with Certbot and copied them to"
+        "Logger: Transferred SSL certificates to"
         f" {elasticCertsPath} and {kibanaCertsPath}"
     )
 
@@ -223,18 +230,15 @@ def configureKibana(conn, kibanaPath, kibanaCertsPath):
     return elasticPass
 
 
-def configureLoggingServer(connection, sensorDomains, email):
+def configureLoggingServer(connection, localCertDir):
     """Completely set up logging server for it to be ready to receive honeypot data
     from sensor servers
 
     :connection: fabric.Connection object with connection to logging server (8 GB RAM)
-    :sensorDomains: list of FQDNs or IP addresses of sensor servers
-    :email: email address to receive Certbot notifications
+    :localCertDir: path to temporary directory containing SSL certificates
     :returns: None
 
     """
-    # generate SSH key
-    connection.run("ssh-keygen -f ~/.ssh/id_rsa -t rsa -b 4096 -N ''", hide="stdout")
 
     elasticPath = "/etc/elasticsearch"
     elasticCertsPath = f"{elasticPath}/certs"
@@ -242,18 +246,13 @@ def configureLoggingServer(connection, sensorDomains, email):
     kibanaCertsPath = f"{kibanaPath}/certs"
 
     installConfigureElasticsearch(
-        connection, email, elasticPath, elasticCertsPath, kibanaCertsPath
+        connection,
+        elasticPath,
+        elasticCertsPath,
+        kibanaPath,
+        kibanaCertsPath,
+        localCertDir,
     )
-
-    # create custom SSL renewal shell script and copy it to logging server
-    updateShPath = createUpdateCertsSh(
-        connection.host, sensorDomains, elasticCertsPath, kibanaPath
-    )
-    renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
-    connection.put(updateShPath)
-    connection.sudo(f"mv updateCerts.sh {renewHookPath}", hide=True)
-    connection.sudo(f"chmod +x {renewHookPath}", hide=True)
-    logger.info(f"Logger: Added custom SSL renewal script to {renewHookPath}")
 
     # block until elasticsearch service (port 64298) is ready
     waitForService(connection.host, 64298)
@@ -285,7 +284,7 @@ def configureLoggingServer(connection, sensorDomains, email):
     with open("passwords.txt", "a") as f:
         f.write(
             f"\n\nChanged password for user {tPotUser}"
-            f"\nPASSWORD {tPotUser} = {tPotPass}"
+            f"\nPASSWORD {tPotUser} = {tPotPass}\n"
         )
 
     # block until kibana service (port 5601) is ready
@@ -301,16 +300,15 @@ def configureLoggingServer(connection, sensorDomains, email):
     )
 
 
-def createAllSudoUsers(sensorObjects, loggingObject=None):
+def createAllSudoUsers(sensorObjects, sudoUser, loggingObject=None):
     """Create non-root sudo users on all servers in network
 
     :sensorObjects: list of sensor server dictionaries from credentials.json
+    :sudoUser: Name of non-root sudo user to create on all servers
     :loggingObject: optional, logging server dictionary from credentials.json
-    :returns: name of user created on all servers
+    :returns: None
 
     """
-    deploymentUser = "tpotadmin"
-
     objsList = (
         [loggingObject] + sensorObjects if loggingObject is not None else sensorObjects
     )
@@ -318,21 +316,23 @@ def createAllSudoUsers(sensorObjects, loggingObject=None):
     for creds in objsList:
         host = creds["host"]
         conn = Connection(host=host, user="root")
-        createSudoUser(conn, deploymentUser, creds["sudopass"])
+        createSudoUser(conn, sudoUser, creds["sudopass"])
         conn.close()
 
-        logger.info(f"Created non-root sudo user {deploymentUser}@{host}")
-
-    return deploymentUser
+        logger.info(f"Created non-root sudo user {sudoUser}@{host}")
 
 
-def deployNetwork(loggingServer=True, credsFile="credentials.json"):
+def deployNetwork(
+    loggingServer=True, credsFile="credentials.json", DOApiKeyFile="digitalocean.ini"
+):
     """Set up entire distributed T-Pot network with logging and sensor servers
 
     :loggingServer: optional, whether to set up central logging server. Defaults to
     True. Set to False if you already have deployed a logging server and want to
     only add sensor server(s)
     :credsFile: optional, path to credentials JSON file. Defaults to credentials.json
+    :DOApiKeyFile: optional, path to file containing DigitalOcean API key. Defaults to
+    digitalocean.ini
     :returns: None
 
     """
@@ -340,53 +340,83 @@ def deployNetwork(loggingServer=True, credsFile="credentials.json"):
         # get server credentials from credentials file
         with open(credsFile) as f:
             credentials = json.load(f)
+            deploymentCreds = credentials["deployment"]
             logCreds = credentials["logging"]
             sensorCreds = credentials["sensors"]
+            tPotSudoUser = credentials["sudouser"]
     except FileNotFoundError:
         raise NoCredentialsFileError(
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
 
+    with open(DOApiKeyFile) as f:
+        apiKey = f.read().strip().split()[-1]
+
+    deploymentConf = InvokeConfig()
+    deploymentConf.sudo.password = deploymentCreds["sudopass"]
+    deploymentConn = Context(config=deploymentConf)
+
+    # generate SSH keys to log into network servers
+    deploymentConn.run(
+        "ssh-keygen -f ~/.ssh/id_rsa -t rsa -b 4096 -N ''", hide="stdout"
+    )
+    logger.info("Deployment: generated SSH keys for network servers")
+    sshKey = deploymentConn.run("cat ~/.ssh/id_rsa.pub", hide="stdout").stdout.strip()
+    # create all network servers specified in credentials.json
+    createAllVMs(apiKey, logCreds, sensorCreds, sshKey)
+    logger.info("Deployment: Created all network servers through DigitalOcean API")
+
+    tempCertPath = generateSSLCerts(
+        deploymentConn,
+        deploymentCreds["email"],
+        logCreds["host"],
+        f"{os.getcwd()}/{DOApiKeyFile}",
+    )
+    logger.info(
+        "Deployment: created Let's Encrypt SSL certificates and made temporary"
+        f"SSL certificate directory {tempCertPath}"
+    )
+
+    sudoUser = deploymentConn.run("whoami", hide="stdout").stdout.strip()
+    certsWrapperPath = createUpdateCertsSh(os.getcwd(), sudoUser)
+    renewHookPath = "/etc/letsencrypt/renewal-hooks/deploy/updateCerts.sh"
+    deploymentConn.sudo(f"cp {certsWrapperPath} {renewHookPath}", hide=True)
+    deploymentConn.sudo(f"chmod u+x {renewHookPath}", hide=True)
+    logger.info(f"Deployment: Added custom SSL renewal script to {renewHookPath}")
+
     if loggingServer:
-        sudoUser = createAllSudoUsers(sensorCreds, logCreds)
+        createAllSudoUsers(sensorCreds, tPotSudoUser, logCreds)
     else:
-        sudoUser = createAllSudoUsers(sensorCreds)
+        createAllSudoUsers(sensorCreds, tPotSudoUser)
 
     logConn = Connection(
         host=logCreds["host"],
-        user=sudoUser,
+        user=tPotSudoUser,
         config=Config(overrides={"sudo": {"password": logCreds["sudopass"]}}),
     )
 
     if loggingServer:
         # set up central logging server
-
-        # this will have to be updated to include sudo usernames for SSL renewal
-
-        sensorHosts = [sensor["host"] for sensor in sensorCreds]
-        configureLoggingServer(logConn, sensorHosts, logCreds["email"])
-
-    # retrieve SSL certificate and SSH public key from logging server
-    logConn.sudo("cp /etc/elasticsearch/certs/fullchain.pem ~/", hide=True)
-    logConn.get("fullchain.pem")
-    logConn.run("rm fullchain.pem")
-    logConn.get(".ssh/id_rsa.pub")
+        configureLoggingServer(logConn, tempCertPath)
 
     logConn.close()
 
-    # set up all sensor servers (make this async soon?)
+    # set up all sensor servers (make this async?)
     for index, sensor in enumerate(sensorCreds):
         sensorConn = Connection(
             host=sensor["host"],
-            user=sudoUser,
+            user=tPotSudoUser,
             config=Config(overrides={"sudo": {"password": sensor["sudopass"]}}),
         )
-        installTPot(index + 1, sensorConn)
+        installTPot(index + 1, sensorConn, tempCertPath)
 
         sensorConn.close()
 
-    os.remove("fullchain.pem")
-    os.remove("id_rsa.pub")
+    # should probably chmod the whole directory since passwords are everywhere TODO
+    deploymentConn.run("chmod 600 passwords.txt credentials.json")
+    # remove temporarily copied SSL certs from generateSSLCerts
+    deploymentConn.run(f"rm -rf {tempCertPath}", hide="stdout")
+    logger.info(f"Removed temporary SSL certificate directory {tempCertPath}")
 
 
 if __name__ == "__main__":
