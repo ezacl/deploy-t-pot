@@ -45,3 +45,14 @@ def waitForService(host, port):
             pass
 
         time.sleep(3)
+
+
+def splitDomain(fqdnStr):
+    """Split an FQDN as a string into its subdomain and top-level domain
+
+    :fqdnStr: FQDN to be split
+    :returns: tuple of the form (subdomain, top-level domain)
+
+    """
+    splitStr = fqdnStr.split(".")
+    return ".".join(splitStr[:-2]), ".".join(splitStr[-2:])

@@ -349,6 +349,7 @@ def deployNetwork(
             f"{credsFile} not found. Did you copy credentials.json.template?"
         )
 
+    # get DigitalOcean API key
     with open(DOApiKeyFile) as f:
         apiKey = f.read().strip().split()[-1]
 
