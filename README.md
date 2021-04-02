@@ -59,6 +59,11 @@
   - Log in with user `elastic` and the password for the user written in `passwords.txt` on the deployment server
 - Go to Analytics > Dashboard > T-Pot to see attack data visualizations
 
+## Teardown:
+
+- Run `python3 destroyNetwork.py` to cleanly tear down entire T-Pot network (including SSH keys, DNS records, and DigitalOcean droplets) through DigitalOcean API
+  - Be careful that this will destroy the entirety of your deployment (except for the deployment server from which you are running the script) without asking for confirmation!
+
 ## Troubleshooting:
 
 - You may have to wait a few minutes for Logstash to start up on the sensor servers and begin sending attack data to the logging server
