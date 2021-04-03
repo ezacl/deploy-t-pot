@@ -30,6 +30,8 @@ def destroyNetwork(credsFile="credentials.json", DOApiKeyFile="digitalocean.ini"
 
     APIRemoveNetwork(apiKey, logCreds, sensorCreds)
 
+    print("T-Pot network successfully destroyed.")
+
 
 if __name__ == "__main__":
     destroyNetwork()

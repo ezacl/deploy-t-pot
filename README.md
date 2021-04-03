@@ -21,13 +21,14 @@
 - Automatic configuration of Kibana dashboard on logging server to have all data visualizations available in a [vanilla T-Pot deployment](https://github.com/telekom-security/tpotce#kibana-dashboard)
 - Creation of non-root sudo user on each network server and disabling of SSH root login and password authentication for security
 - Only one Python script to run after having pip installed dependencies on deployment server for everything to be set up
+- Complete teardown script to clean up entire network in one command
 
 ## Installation:
 
 ### Create Deployment Server:
 
 - First, you must create the deployment server through the DigitalOcean dashboard
-- Deployment server: Debian 10, ≥ 2 GB RAM, ≥ 10 GB disk space
+- Deployment server: Debian 10, ≥ 1 GB RAM, ≥ 10 GB disk space
 - Create a non-root user with sudo privileges to run the deployment scripts: `adduser --gecos "" deploymentuser` and `usermod -aG sudo deploymentuser`
 - Stop your root SSH session and log in again as the created user (`deploymentuser` from the line above)
 - Check that you have Python ≥ 3.7 installed, then also install git and pip with `sudo apt-get --yes install git python3-pip`

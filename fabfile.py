@@ -374,8 +374,8 @@ def deployNetwork(
         f"{os.getcwd()}/{DOApiKeyFile}",
     )
     logger.info(
-        "Deployment: created Let's Encrypt SSL certificates and made temporary"
-        f"SSL certificate directory {tempCertPath}"
+        "Deployment: Created Let's Encrypt SSL certificates and made temporary"
+        f" SSL certificate directory {tempCertPath}"
     )
 
     sudoUser = deploymentConn.run("whoami", hide="stdout").stdout.strip()
