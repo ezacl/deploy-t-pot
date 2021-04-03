@@ -1,6 +1,12 @@
 import time
+from datetime import datetime
 
 import requests
+
+from utils import splitDomain
+
+KEY_BASE_NAME = "T-Pot deployment"
+DEFAULT_REGION = "nyc1"
 
 
 def addSSHKey(apiToken, keyName, keyContent):
@@ -134,16 +140,11 @@ def createAllVMs(apiToken, loggingObj, sensorObjs, sshKey):
     :returns: None
 
     """
-    sshKeyName = "T-Pot deployment server"
+    date = datetime.now().strftime("%m-%d-%Y")
+    sshKeyName = f"{KEY_BASE_NAME} {date}"
     sshKeyId = addSSHKey(apiToken, sshKeyName, sshKey)
 
-    defaultRegion = "nyc1"
-    region = chooseRegion(apiToken, defaultRegion)
-
-    def splitDomain(domainStr):
-        """Split an FQDN as a string into its domain and subdomain"""
-        splitStr = domainStr.split(".")
-        return ".".join(splitStr[:-2]), ".".join(splitStr[-2:])
+    region = chooseRegion(apiToken, DEFAULT_REGION)
 
     subDomain, domainName = splitDomain(loggingObj["host"])
     createVM(apiToken, subDomain, domainName, region, sshKeyId, loggerSize=True)
@@ -151,3 +152,116 @@ def createAllVMs(apiToken, loggingObj, sensorObjs, sshKey):
     for sensor in sensorObjs:
         subDomain, domainName = splitDomain(sensor["host"])
         createVM(apiToken, subDomain, domainName, region, sshKeyId)
+
+
+def deleteSSHKey(apiToken):
+    """Delete T-Pot SSH key through DigitalOcean API
+
+    :apiToken: DigitalOcean API key
+    :returns: None
+
+    """
+    sshEndpoint = "https://api.digitalocean.com/v2/account/keys"
+    headers = {"Authorization": f"Bearer {apiToken}"}
+    sshReq = requests.get(sshEndpoint, headers=headers)
+    sshReq.raise_for_status()
+
+    # delete deployment server SSH key
+    for key in sshReq.json()["ssh_keys"]:
+        if key["name"].startswith(KEY_BASE_NAME):
+            deleteKeyId = key["id"]
+            sshDeleteReq = requests.delete(
+                f"{sshEndpoint}/{deleteKeyId}", headers=headers
+            )
+            sshDeleteReq.raise_for_status()
+
+
+def deleteDNSRecords(apiToken, tldList, subdomainList):
+    """Delete T-Pot DNS records through DigitalOcean API
+
+    :apiToken: DigitalOcean API key
+    :tldList: list of all top-level domain names involved in T-Pot network
+    :subdomainList: list of all subdomains involved in T-Pot network
+    :returns: None
+
+    """
+    headers = {"Authorization": f"Bearer {apiToken}"}
+    recordsList = []
+
+    # make list of all records across all domains
+    for domainName in tldList:
+        domainEndpoint = f"https://api.digitalocean.com/v2/domains/{domainName}/records"
+        recordReq = requests.get(domainEndpoint, headers=headers)
+        recordReq.raise_for_status()
+
+        # add top-level domain to each record to know how to delete it later
+        for record in recordReq.json()["domain_records"]:
+            # "domain" key isn't returned by API, so add it for use in next for loop
+            record["domain"] = domainName
+            recordsList.append(record)
+
+    # delete all T-Pot DNS records
+    for record in recordsList:
+        if record["name"] in subdomainList:
+            domainName = record["domain"]
+            recordId = record["id"]
+            domainEndpoint = (
+                "https://api.digitalocean.com/v2/domains/"
+                f"{domainName}/records/{recordId}"
+            )
+            recordDeleteReq = requests.delete(domainEndpoint, headers=headers)
+            recordDeleteReq.raise_for_status()
+
+
+def deleteDroplets(apiToken, subdomainList):
+    """Delete all T-Pot related droplets through DigitalOcean API
+
+    :apiToken: DigitalOcean API key
+    :subdomainList: list of all subdomains involved in T-Pot network
+    :returns: None
+
+    """
+    headers = {"Authorization": f"Bearer {apiToken}"}
+    dropletEndpoint = "https://api.digitalocean.com/v2/droplets"
+    dropletReq = requests.get(dropletEndpoint, headers=headers)
+    dropletReq.raise_for_status()
+
+    # delete all T-Pot droplets
+    for droplet in dropletReq.json()["droplets"]:
+        # installation scripts automatically name all droplets the subdomain chosen for
+        # each server in credentials.json, so rely on that to identify them
+        if droplet["name"] in subdomainList:
+            dropletId = droplet["id"]
+            dropletDeleteReq = requests.delete(
+                f"{dropletEndpoint}/{dropletId}", headers=headers
+            )
+            dropletDeleteReq.raise_for_status()
+
+
+def APIRemoveNetwork(apiToken, loggingObj, sensorObjs):
+    """Cleanly tear down all droplets/DNS records/SSH keys associated with T-Pot network
+    through DigitalOcean API
+
+    :apiToken: DigitalOcean API key
+    :loggingObj: JSON object representing logging server
+    :sensorObjs: array of JSON objects representing sensor servers
+    :returns: None
+
+    """
+    subdomainList = []
+    tldList = []
+
+    # get all subdomains and top-level domains involved in T-Pot network
+    for serverObj in [loggingObj] + sensorObjs:
+        subDomain, domainName = splitDomain(serverObj["host"])
+        subdomainList.append(subDomain)
+        tldList.append(domainName)
+
+    # remove duplicate top-level domains
+    tldList = list(set(tldList))
+
+    deleteSSHKey(apiToken)
+
+    deleteDNSRecords(apiToken, tldList, subdomainList)
+
+    deleteDroplets(apiToken, subdomainList)
