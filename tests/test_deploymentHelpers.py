@@ -3,7 +3,6 @@ import string
 
 import deploymentHelpers
 import pytest
-import requests
 from errors import BadAPIRequestError, NotCreatedError
 from requests.exceptions import HTTPError
 
@@ -41,7 +40,9 @@ class RoleResponse:
 class TestCreateTPotRole:
     def test_good_role(self, monkeypatch):
         """Create T-Pot role correctly"""
-        monkeypatch.setattr(requests, "post", lambda *args, **kwargs: RoleResponse())
+        monkeypatch.setattr(
+            deploymentHelpers.requests, "post", lambda *args, **kwargs: RoleResponse()
+        )
         assert (
             deploymentHelpers.createTPotRole(dummyUrl, dummyUser, dummyPass)
             == createdRoleName
@@ -50,7 +51,9 @@ class TestCreateTPotRole:
     def test_not_created_role(self, monkeypatch):
         """Try to create T-Pot role but don't get role created"""
         monkeypatch.setattr(
-            requests, "post", lambda *args, **kwargs: RoleResponse(created=False)
+            deploymentHelpers.requests,
+            "post",
+            lambda *args, **kwargs: RoleResponse(created=False),
         )
         with pytest.raises(NotCreatedError):
             deploymentHelpers.createTPotRole(dummyUrl, dummyUser, dummyPass)
@@ -58,7 +61,9 @@ class TestCreateTPotRole:
     def test_bad_request_role(self, monkeypatch):
         """Create T-Pot role with bad API request"""
         monkeypatch.setattr(
-            requests, "post", lambda *args, **kwargs: RoleResponse(badRequest=True)
+            deploymentHelpers.requests,
+            "post",
+            lambda *args, **kwargs: RoleResponse(badRequest=True),
         )
         with pytest.raises(BadAPIRequestError):
             deploymentHelpers.createTPotRole(dummyUrl, dummyUser, dummyPass)
@@ -73,7 +78,9 @@ class TestCreateTPotUser:
         )
         # mock requests.post() for API requests
         monkeypatch.setattr(
-            requests, "post", lambda *args, **kwargs: RoleResponse(role=False)
+            deploymentHelpers.requests,
+            "post",
+            lambda *args, **kwargs: RoleResponse(role=False),
         )
 
         userTup = deploymentHelpers.createTPotUser(
@@ -91,7 +98,9 @@ class TestCreateTPotUser:
             deploymentHelpers, "createTPotRole", lambda *args, **kwargs: createdRoleName
         )
         monkeypatch.setattr(
-            requests, "post", lambda *args, **kwargs: RoleResponse(role=False)
+            deploymentHelpers.requests,
+            "post",
+            lambda *args, **kwargs: RoleResponse(role=False),
         )
         userTup = deploymentHelpers.createTPotUser(
             dummyUrl, dummyUser, creatorPwd=dummyPass, createdPwd=dummyPass
@@ -106,7 +115,7 @@ class TestCreateTPotUser:
             deploymentHelpers, "createTPotRole", lambda *args, **kwargs: createdRoleName
         )
         monkeypatch.setattr(
-            requests,
+            deploymentHelpers.requests,
             "post",
             lambda *args, **kwargs: RoleResponse(role=False, created=False),
         )
@@ -119,7 +128,7 @@ class TestCreateTPotUser:
             deploymentHelpers, "createTPotRole", lambda *args, **kwargs: createdRoleName
         )
         monkeypatch.setattr(
-            requests,
+            deploymentHelpers.requests,
             "post",
             lambda *args, **kwargs: RoleResponse(role=False, badRequest=True),
         )

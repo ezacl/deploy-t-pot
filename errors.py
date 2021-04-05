@@ -32,3 +32,12 @@ class NoCredentialsFileError(BaseException):
     """
 
     pass
+
+
+class NoSubdomainError(BaseException):
+    """Error class to indicate that an FQDN passed to utils.splitDomain was not of the
+    form subdomain.domain.com (as it needs to split the string into the subdomain and
+    the top-level domain)
+    """
+
+    pass
