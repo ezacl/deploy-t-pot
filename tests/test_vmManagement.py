@@ -2,64 +2,18 @@ import pytest
 import vmManagement
 from requests.exceptions import HTTPError
 
-DUMMY_ID = 523529
-GOOD_STATUS_CODE = 200
-BAD_STATUS_CODE = 500
-DUMMY_TOKEN = "dummyToken"
+from .mockResponse import (DUMMY_ID, DUMMY_IP, DUMMY_REGION, DUMMY_TOKEN,
+                           MockResponse)
+
 DUMMY_SUB_DOMAIN = "subdomain"
 DUMMY_DOMAIN = "domain.com"
-DUMMY_IP = "0.0.0.0"
-DUMMY_REGION = "region"
 DEFAULT_REGION = "someregion"
-DUMMY_HEADER = {"Authorization": f"Bearer {DUMMY_TOKEN}"}
-
-
-class MockResponse:
-    def __init__(self, status_code, kwargsDict, jsonType=None):
-        # choose whether to throw HTTPError when raise_for_status() called
-        self.status_code = status_code
-        # choose which type of JSON to return (tailored to different API endpoints)
-        self.jsonType = jsonType
-        # all API calls should be made with bearer token header, so always check
-        assert kwargsDict["headers"] == DUMMY_HEADER
-
-    def raise_for_status(self):
-        if self.status_code < 200 or self.status_code >= 400:
-            raise HTTPError(f"Bad status code: {self.status_code}")
-
-    def json(self):
-        if self.jsonType == "chooseRegionNoDroplets":
-            return {"droplets": []}
-        elif self.jsonType == "chooseRegionOtherDroplets":
-            return {
-                "droplets": [
-                    {"region": {"slug": DUMMY_REGION}},
-                    {"region": {"slug": DUMMY_REGION}},
-                    {"region": {"slug": "other"}},
-                ]
-            }
-        elif self.jsonType == "addSSHKey":
-            return {"ssh_key": {"id": DUMMY_ID}}
-        elif self.jsonType == "waitForVM":
-            return {
-                "droplet": {
-                    "networks": {
-                        "v4": [
-                            {
-                                "type": "private",
-                                "ip_address": "3.4.0.1",
-                            },
-                            {
-                                "type": "public",
-                                "ip_address": DUMMY_IP,
-                            },
-                        ]
-                    }
-                }
-            }
 
 
 class TestAddSSHKey:
+
+    jsonType = "addSSHKey"
+
     def test_good_addSSHKey(self, monkeypatch):
         """Add SSH key correctly"""
 
@@ -67,7 +21,7 @@ class TestAddSSHKey:
             vmManagement.requests,
             "post",
             lambda *args, **kwargs: MockResponse(
-                GOOD_STATUS_CODE, kwargs, jsonType="addSSHKey"
+                kwargsDict=kwargs, jsonType=__class__.jsonType
             ),
         )
         sshId = vmManagement.addSSHKey(DUMMY_TOKEN, "dummyKey", "dummyContent")
@@ -80,7 +34,7 @@ class TestAddSSHKey:
             vmManagement.requests,
             "post",
             lambda *args, **kwargs: MockResponse(
-                BAD_STATUS_CODE, kwargs, jsonType="addSSHKey"
+                statusError=True, kwargsDict=kwargs, jsonType=__class__.jsonType
             ),
         )
         with pytest.raises(HTTPError):
@@ -89,9 +43,10 @@ class TestAddSSHKey:
 
 class TestCreateARecord:
     def test_good_createARecord(self, mocker):
+        """Create A record correctly"""
         mocker.patch(
             "vmManagement.requests.post",
-            side_effect=lambda *args, **kwargs: MockResponse(GOOD_STATUS_CODE, kwargs),
+            side_effect=lambda *args, **kwargs: MockResponse(kwargsDict=kwargs),
         )
         vmManagement.createARecord(
             DUMMY_TOKEN, DUMMY_SUB_DOMAIN, DUMMY_DOMAIN, DUMMY_IP
@@ -106,7 +61,7 @@ class TestCreateARecord:
         monkeypatch.setattr(
             vmManagement.requests,
             "post",
-            lambda *args, **kwargs: MockResponse(BAD_STATUS_CODE, kwargs),
+            lambda *args, **kwargs: MockResponse(statusError=True, kwargsDict=kwargs),
         )
         with pytest.raises(HTTPError):
             vmManagement.createARecord(
@@ -115,13 +70,17 @@ class TestCreateARecord:
 
 
 class TestWaitForVM:
+
+    jsonType = "waitForVM"
+
     def test_immediate_response(self, mocker):
+        """Have API respond with IP address immediately"""
         # no need to sleep in test cases
         mocker.patch("vmManagement.time.sleep")
         mocker.patch(
             "vmManagement.requests.get",
             side_effect=lambda *args, **kwargs: MockResponse(
-                GOOD_STATUS_CODE, kwargs, jsonType="waitForVM"
+                kwargsDict=kwargs, jsonType=__class__.jsonType
             ),
         )
 
@@ -137,27 +96,55 @@ class TestWaitForVM:
 
 
 class TestCreateVM:
+
+    jsonType = "createVM"
+
     def test_bad_vm_request(self, monkeypatch):
         """Create VM but get bad response status code"""
         monkeypatch.setattr(
             vmManagement.requests,
             "post",
-            lambda *args, **kwargs: MockResponse(BAD_STATUS_CODE, kwargs),
+            lambda *args, **kwargs: MockResponse(statusError=True, kwargsDict=kwargs),
         )
         with pytest.raises(HTTPError):
             vmManagement.createVM(
                 DUMMY_TOKEN, DUMMY_SUB_DOMAIN, DUMMY_DOMAIN, DUMMY_REGION, DUMMY_ID
             )
 
+    def test_good_vm_request(self, mocker):
+        """Create VM correctly"""
+        mocker.patch(
+            "vmManagement.requests.post",
+            side_effect=lambda *args, **kwargs: MockResponse(
+                kwargsDict=kwargs, jsonType=__class__.jsonType
+            ),
+        )
+        mocker.patch("vmManagement.waitForVM", return_value=DUMMY_IP)
+        mocker.patch("vmManagement.createARecord")
+
+        vmManagement.createVM(
+            DUMMY_TOKEN, DUMMY_SUB_DOMAIN, DUMMY_DOMAIN, DUMMY_REGION, DUMMY_ID
+        )
+
+        # check that both other (mocked) functions were called correctly
+        vmManagement.waitForVM.assert_called_once_with(DUMMY_TOKEN, DUMMY_ID)
+        vmManagement.createARecord.assert_called_once_with(
+            DUMMY_TOKEN, DUMMY_SUB_DOMAIN, DUMMY_DOMAIN, DUMMY_IP
+        )
+
 
 class TestChooseRegion:
+
+    jsonNoDroplets = "chooseRegionNoDroplets"
+    jsonOtherDroplets = "chooseRegionOtherDroplets"
+
     def test_bad_region(self, monkeypatch):
         """Choose region but get bad response status code"""
         monkeypatch.setattr(
             vmManagement.requests,
             "get",
             lambda *args, **kwargs: MockResponse(
-                BAD_STATUS_CODE, kwargs, jsonType="chooseRegionNoDroplets"
+                statusError=True, kwargsDict=kwargs, jsonType=__class__.jsonNoDroplets
             ),
         )
         with pytest.raises(HTTPError):
@@ -169,7 +156,7 @@ class TestChooseRegion:
             vmManagement.requests,
             "get",
             lambda *args, **kwargs: MockResponse(
-                GOOD_STATUS_CODE, kwargs, jsonType="chooseRegionOtherDroplets"
+                kwargsDict=kwargs, jsonType=__class__.jsonOtherDroplets
             ),
         )
         region = vmManagement.chooseRegion(DUMMY_TOKEN, DEFAULT_REGION)
@@ -182,7 +169,7 @@ class TestChooseRegion:
             vmManagement.requests,
             "get",
             lambda *args, **kwargs: MockResponse(
-                GOOD_STATUS_CODE, kwargs, jsonType="chooseRegionNoDroplets"
+                kwargsDict=kwargs, jsonType=__class__.jsonNoDroplets
             ),
         )
         region = vmManagement.chooseRegion(DUMMY_TOKEN, DEFAULT_REGION)
