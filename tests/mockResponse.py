@@ -1,4 +1,5 @@
 from requests.exceptions import HTTPError
+from vmManagement import KEY_BASE_NAME
 
 DUMMY_ID = 523529
 DUMMY_TOKEN = "dummyToken"
@@ -53,7 +54,7 @@ class MockResponse:
                                 "type": "private",
                                 "ip_address": "3.4.0.1",
                             },
-                            {
+                            {  # waitForVM should return DUMMY_IP because of this
                                 "type": "public",
                                 "ip_address": DUMMY_IP,
                             },
@@ -67,5 +68,18 @@ class MockResponse:
             return {"role": {"created": self.userRoleCreated}}
         elif self.jsonType == "createUser":
             return {"created": self.userRoleCreated}
+        elif self.jsonType == "deleteSSHKey":
+            return {
+                "ssh_keys": [
+                    {
+                        "name": "wrong name",
+                        "id": 123123,
+                    },
+                    {  # deleteSSHKey should include DUMMY_ID in API endpoint
+                        "name": KEY_BASE_NAME + "extra string",
+                        "id": DUMMY_ID,
+                    },
+                ]
+            }
         else:
             return {}

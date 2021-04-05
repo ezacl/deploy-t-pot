@@ -8,6 +8,13 @@ from .mockResponse import (DUMMY_ID, DUMMY_IP, DUMMY_REGION, DUMMY_TOKEN,
 DUMMY_SUB_DOMAIN = "subdomain"
 DUMMY_DOMAIN = "domain.com"
 DEFAULT_REGION = "someregion"
+DUMMY_SSH_KEY = "ssh key text"
+DUMMY_LOGGING_OBJ = {"host": f"{DUMMY_SUB_DOMAIN}.{DUMMY_DOMAIN}"}
+DUMMY_SENSOR_OBJS = [
+    {"host": f"{DUMMY_SUB_DOMAIN}.{DUMMY_DOMAIN}"},
+    {"host": f"{DUMMY_SUB_DOMAIN}.{DUMMY_DOMAIN}"},
+    {"host": f"{DUMMY_SUB_DOMAIN}.{DUMMY_DOMAIN}"},
+]
 
 
 class TestAddSSHKey:
@@ -175,3 +182,54 @@ class TestChooseRegion:
         region = vmManagement.chooseRegion(DUMMY_TOKEN, DEFAULT_REGION)
         # make sure that function falls back to DEFAULT_REGION if no other droplets
         assert region == DEFAULT_REGION
+
+
+class TestCreateAllVMs:
+    def test_correct_amount_createVM_calls(self, mocker):
+        """Check that createAllVMs is called the appropriate number of times"""
+        mocker.patch("vmManagement.addSSHKey", return_value=DUMMY_ID)
+        mocker.patch("vmManagement.chooseRegion", return_value=DEFAULT_REGION)
+        mocker.patch("vmManagement.createVM")
+
+        vmManagement.createAllVMs(
+            DUMMY_TOKEN, DUMMY_LOGGING_OBJ, DUMMY_SENSOR_OBJS, DUMMY_SSH_KEY
+        )
+
+        # createVM should be called an amount of times equal to the length of
+        # DUMMY_SENSOR_OBJS + 1 for DUMMY_LOGGING_OBJ
+        assert vmManagement.createVM.call_count == len(DUMMY_SENSOR_OBJS) + 1
+
+
+class TestDeleteSSHKey:
+
+    jsonType = "deleteSSHKey"
+
+    def test_bad_delete(self, mocker):
+        """Try to delete SSH key but return bad HTTP status code"""
+        mocker.patch(
+            "vmManagement.requests.get",
+            side_effect=lambda *args, **kwargs: MockResponse(
+                statusError=True, kwargsDict=kwargs, jsonType=__class__.jsonType
+            ),
+        )
+        with pytest.raises(HTTPError):
+            vmManagement.deleteSSHKey(DUMMY_TOKEN)
+
+    def test_correct_delete(self, mocker):
+        """Check that deleteSSHKey deletes the right key"""
+        mocker.patch(
+            "vmManagement.requests.get",
+            side_effect=lambda *args, **kwargs: MockResponse(
+                kwargsDict=kwargs, jsonType=__class__.jsonType
+            ),
+        )
+        mocker.patch(
+            "vmManagement.requests.delete",
+            side_effect=lambda *args, **kwargs: MockResponse(kwargsDict=kwargs),
+        )
+        vmManagement.deleteSSHKey(DUMMY_TOKEN)
+
+        vmManagement.requests.delete.assert_called_once()
+        # DUMMY_ID returned in JSON of requests.get should be in the API endpoint for
+        # the requests.delete call
+        assert str(DUMMY_ID) in vmManagement.requests.delete.call_args.args[0]
