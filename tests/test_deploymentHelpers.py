@@ -14,6 +14,19 @@ createdRoleName = "t_pot_writer"
 createdUserName = "t_pot_internal"
 
 
+class TestInstallPackages:
+    def test_list_packages(self, mocker):
+        mockedConnection = mocker.MagicMock()
+        packageList = ["package1", "another", "oneMore"]
+        packageStr = "package1 another oneMore"
+        deploymentHelpers.installPackages(mockedConnection, packageList)
+
+        posArgs = [call.args[0] for call in mockedConnection.sudo.call_args_list]
+        # check that all packages as string were passed to function, presumably to
+        # "apt-get install {packages}"
+        assert any([packageStr in command for command in posArgs])
+
+
 class TestCreateTPotRole:
     jsonType = "createRole"
 

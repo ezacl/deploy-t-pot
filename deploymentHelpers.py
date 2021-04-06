@@ -121,13 +121,14 @@ def transferSSLCerts(
 
     """
     if loggingServer:
-        connection.run("mkdir certs", hide="stdout")
+        tempCertsPath = "certs"
+        connection.run(f"mkdir {tempCertsPath}", hide="stdout")
 
         for file in os.listdir(certDir):
-            connection.put(f"{certDir}/{file}", remote="certs/")
+            connection.put(f"{certDir}/{file}", remote=f"{tempCertsPath}/")
 
         connection.sudo(f"rm -rf {elasticCertsPath}", hide=True)
-        connection.sudo(f"mv certs {elasticPath}/", hide=True)
+        connection.sudo(f"mv {tempCertsPath} {elasticPath}/", hide=True)
         connection.sudo(f"chown -R root:elasticsearch {elasticCertsPath}", hide=True)
         connection.sudo(f"chmod 644 {elasticCertsPath}/privkey.pem", hide=True)
         connection.sudo(f"rm -rf {kibanaCertsPath}", hide=True)
@@ -153,7 +154,10 @@ def setupCurator(connection, configPath, elasticPass):
     curatorConfigPath = createCuratorConfigYml(connection.host, elasticPass)
     connection.put(curatorConfigPath)
     connection.put("configFiles/curatorActions.yml")
-    connection.sudo(f"mv curatorConfig.yml curatorActions.yml {configPath}", hide=True)
+    connection.sudo(
+        f"mv {os.path.basename(curatorConfigPath)} curatorActions.yml {configPath}",
+        hide=True,
+    )
 
     # add cronjob to run curator every day at midnight (curator needs root)
     curatorCommand = (
