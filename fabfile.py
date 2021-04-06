@@ -45,8 +45,9 @@ def installTPot(number, connection, certDir):
     logger.info(f"Sensor {number}: Updated packages and installed git")
 
     # copy vimrc over for convenience
-    connection.put("configFiles/.vimrc")
-    connection.sudo("cp .vimrc /root/", hide=True)
+    vimrcPath = "configFiles/.vimrc"
+    connection.put(vimrcPath)
+    connection.sudo(f"cp {os.path.basename(vimrcPath)} /root/", hide=True)
 
     tPotPath = "/opt/tpot"
 
@@ -67,8 +68,9 @@ def installTPot(number, connection, certDir):
     dataPath = "/data/elk"
 
     # copy custom logstash.conf into location where tpot.yml expects a docker volume
-    connection.put("configFiles/logstash.conf")
-    connection.sudo(f"mv logstash.conf {dataPath}/", hide=True)
+    logstashPath = "configFiles/logstash.conf"
+    connection.put(logstashPath)
+    connection.sudo(f"mv {os.path.basename(logstashPath)} {dataPath}/", hide=True)
 
     # copy SSL certificate over to sensor server
     transferSSLCerts(connection, certDir, loggingServer=False, dataPath=dataPath)
@@ -99,8 +101,9 @@ def installConfigureElasticsearch(
     installPackages(conn, elkDeps)
 
     # copy vimrc over for convenience
-    conn.put("configFiles/.vimrc")
-    conn.sudo("cp .vimrc /root/", hide=True)
+    vimrcPath = "configFiles/.vimrc"
+    conn.put(vimrcPath)
+    conn.sudo(f"cp {os.path.basename(vimrcPath)} /root/", hide=True)
 
     logger.info("Logger: Updated packages and installed ELK dependencies")
 

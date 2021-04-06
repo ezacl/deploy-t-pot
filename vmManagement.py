@@ -51,11 +51,11 @@ def createARecord(apiToken, subDomain, domainName, ipAddress):
 
 def waitForVM(apiToken, dropletId):
     """Block until DigitalOcean droplet (created by createVM) is up and running (until
-    it has an IP address associated to it)
+    it has an IP address associated to it) and return IP address
 
     :apiToken: DigitalOcean API key
     :dropletId: ID of droplet
-    :returns: None
+    :returns: IPv4 address of droplet
 
     """
     endpoint = f"https://api.digitalocean.com/v2/droplets/{dropletId}"

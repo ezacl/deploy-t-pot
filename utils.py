@@ -4,7 +4,7 @@ import time
 import requests
 from requests.exceptions import ConnectionError
 
-from errors import NotFoundError
+from errors import NoSubdomainError, NotFoundError
 
 
 def findPassword(passwordText, username):
@@ -55,4 +55,10 @@ def splitDomain(fqdnStr):
 
     """
     splitStr = fqdnStr.split(".")
-    return ".".join(splitStr[:-2]), ".".join(splitStr[-2:])
+    domainTup = ".".join(splitStr[:-2]), ".".join(splitStr[-2:])
+    if domainTup[0] == "":
+        raise NoSubdomainError(
+            f"{fqdnStr} does not contain a subdomain and top-level domain"
+        )
+    else:
+        return domainTup
