@@ -60,7 +60,7 @@ class TestCreateARecord:
         )
         vmManagement.requests.post.assert_called_once()
         # API endpoint should have domain name in it
-        assert DUMMY_DOMAIN in vmManagement.requests.post.call_args.args[0]
+        assert DUMMY_DOMAIN in vmManagement.requests.post.call_args[0][0]
 
     def test_bad_createARecord(self, monkeypatch):
         """Create A record but get bad response status code"""
@@ -96,7 +96,7 @@ class TestWaitForVM:
         vmManagement.requests.get.assert_called_once()
 
         # droplet ID should be present in API endpoint
-        assert str(DUMMY_ID) in vmManagement.requests.get.call_args.args[0]
+        assert str(DUMMY_ID) in vmManagement.requests.get.call_args[0][0]
 
         # returned in "waitForVM" case of MockResponse().json()
         assert vmIp == DUMMY_IP
@@ -232,4 +232,4 @@ class TestDeleteSSHKey:
         vmManagement.requests.delete.assert_called_once()
         # DUMMY_ID returned in JSON of requests.get should be in the API endpoint for
         # the requests.delete call
-        assert str(DUMMY_ID) in vmManagement.requests.delete.call_args.args[0]
+        assert str(DUMMY_ID) in vmManagement.requests.delete.call_args[0][0]
