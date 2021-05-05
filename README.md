@@ -31,6 +31,7 @@
 - Deployment server: Debian 10, ≥ 1 GB RAM, ≥ 10 GB disk space
 - Create a non-root user with sudo privileges to run the deployment scripts: `adduser --gecos "" deploymentuser` and `usermod -aG sudo deploymentuser`
 - Stop your root SSH session and log in again as the created user (`deploymentuser` from the line above)
+  - Note: if you SSH into the deployment server using SSH keys instead of password authentication, you probably want to copy the root user's .ssh directory (especially `authorized_hosts`) into `deploymentuser`'s home directory and adjust permissions accordingly. Otherwise, you may not be able to SSH into the deployment server as `deploymentuser`
 - Check that you have Python ≥ 3.7 installed, then also install git and pip with `sudo apt-get --yes install git python3-pip`
 - Upgrade pip: `pip3 install --upgrade pip`
 - Clone repository: `git clone https://github.com/ezacl/deploy-t-pot`
